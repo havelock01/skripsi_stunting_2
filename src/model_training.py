@@ -1,15 +1,14 @@
 import pandas as pd
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder
+import joblib
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import classification_report, confusion_matrix
-import joblib
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder
 
-# 1. Load dataset
-df = pd.read_csv("data/stunting_2023_labeled.csv")
+# --- Load dataset
+file_path = "data/stunting_2023_labeled.csv"
+df = pd.read_csv(file_path)
 
-# 2. Pilih fitur dan target
 fitur_kategori = [
     'Desa_melakukan_monitoring/evaluasi_atas_pelaksanaan_konvergensi_stunting_min._2_kali_dlm_1tahun',
     'Aktivitas_rutin_Penyelenggaraan_posyandu_',
@@ -17,39 +16,30 @@ fitur_kategori = [
     'Terdapat_Pelaku_Desa_(Kader,_KPM,_TPK)_mendapatkan_peningkatan_kapasitas',
     'Terdapat_Pengembangan_Program_Ketahanan_Pangan'
 ]
-X = df[fitur_kategori]
+
+X = df[fitur_kategori].fillna("Tidak Ada")
+X = X.apply(lambda col: col.str.strip().str.lower())
+
+# Encode fitur kategorikal
+le_dict = {}
+for col in fitur_kategori:
+    le = LabelEncoder()
+    X[col] = le.fit_transform(X[col])
+    le_dict[col] = le
+
+# Encode label target
 y = df['label_efektivitas']
+y = LabelEncoder().fit_transform(y)
 
-# 3. Encode kategori ke numerik
-X_encoded = X.apply(LabelEncoder().fit_transform)
-y_encoded = LabelEncoder().fit_transform(y)
+# Split data
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-# 4. Split data
-X_train, X_test, y_train, y_test = train_test_split(X_encoded, y_encoded, test_size=0.2, random_state=42)
-
-# 5. Model Decision Tree
+# --- Train Decision Tree
 dt_model = DecisionTreeClassifier(random_state=42)
 dt_model.fit(X_train, y_train)
-y_pred_dt = dt_model.predict(X_test)
-
-# 6. Model Random Forest
-rf_model = RandomForestClassifier(random_state=42)
-rf_model.fit(X_train, y_train)
-y_pred_rf = rf_model.predict(X_test)
-
-# 7. Evaluasi
-print("=== Decision Tree ===")
-print(confusion_matrix(y_test, y_pred_dt))
-print(classification_report(y_test, y_pred_dt))
-
-print("=== Random Forest ===")
-print(confusion_matrix(y_test, y_pred_rf))
-print(classification_report(y_test, y_pred_rf))
-
-# 8. Simpan model
-joblib.dump(rf_model, "model/random_forest_model.pkl")
 joblib.dump(dt_model, "model/decision_tree_model.pkl")
 
-from evaluation import evaluate_model
-evaluate_model(rf_model, X_test, y_test, "Random Forest")
-evaluate_model(dt_model, X_test, y_test, "Decision Tree")
+# --- Train Random Forest with class_weight balancing
+rf_model = RandomForestClassifier(n_estimators=100, random_state=42, class_weight='balanced')
+rf_model.fit(X_train, y_train)
+joblib.dump(rf_model, "model/random_forest_model.pkl")
