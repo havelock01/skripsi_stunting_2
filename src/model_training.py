@@ -49,3 +49,7 @@ print(classification_report(y_test, y_pred_rf))
 # 8. Simpan model
 joblib.dump(rf_model, "model/random_forest_model.pkl")
 joblib.dump(dt_model, "model/decision_tree_model.pkl")
+
+from evaluation import evaluate_model
+evaluate_model(rf_model, X_test, y_test, "Random Forest")
+evaluate_model(dt_model, X_test, y_test, "Decision Tree")
