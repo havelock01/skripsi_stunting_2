@@ -37,7 +37,6 @@ fitur_kategori = [
     'Terdapat_Pengembangan_Program_Ketahanan_Pangan'
 ]
 
-
 # --- Encode awal seluruh dataset
 X_raw, le_dict = fit_label_encoders(df[fitur_kategori].copy(), fitur_kategori)
 pred = model.predict(X_raw)
@@ -52,8 +51,6 @@ if 'NAMA_KABUPATEN' in df.columns:
 
 # --- Data Display
 st.subheader("Data dan Prediksi")
-# st.write("Kolom tersedia:", df.columns.tolist())
-
 df_display = df[['NAMA_DESA'] + fitur_kategori + ['Prediksi_Model']].reset_index(drop=True)
 st.dataframe(df_display)
 
@@ -82,18 +79,13 @@ with st.form("manual_form"):
 
 if submitted:
     df_encoded = encode_manual_input(input_data, le_dict, fitur_kategori)
-
-    # 🔍 Tampilkan hasil encoding
     st.markdown("🔍 **Hasil encoding input manual:**")
     st.dataframe(df_encoded)
-
-    # 📋 Tampilkan mapping encoder
     st.markdown("#### Mapping LabelEncoder:")
     for col in fitur_kategori:
         le = le_dict[col]
         st.text(f"{col}: {dict(zip(le.classes_, le.transform(le.classes_)))}")
 
-    # 🔮 Prediksi dan SHAP
     pred_manual = model.predict(df_encoded)[0]
     label_pred = "Efektif" if pred_manual == 1 else "Tidak Efektif"
     st.success(f"Prediksi: **{label_pred}**")
@@ -108,239 +100,157 @@ if submitted:
     ), show=False)
     st.pyplot(fig)
 
+# === Tabs Evaluasi ===
+tab1, tab2, tab3, tab4 = st.tabs(["📉 Random Forest", "🌳 Decision Tree", "⚖️ Perbandingan", "📤 Unduhan"])
 
-# --- Visualisasi Tambahan
-st.subheader("Ringkasan Prediksi")
-pie_df = df['Prediksi_Model'].value_counts().reset_index()
-pie_df.columns = ['Efektivitas', 'Jumlah']
-fig_pie = px.pie(pie_df, names='Efektivitas', values='Jumlah', title='Distribusi Prediksi')
-st.plotly_chart(fig_pie)
+with tab1:
+    st.subheader("📊 Evaluasi Model Random Forest")
+    X_eval = df[fitur_kategori].fillna("Tidak Ada")
+    X_eval = normalize_kategorikal(X_eval, fitur_kategori)
+    X_eval_encoded = X_eval.copy()
+    for col in fitur_kategori:
+        X_eval_encoded[col] = le_dict[col].transform(X_eval[col])
 
-if 'skor' in df.columns and 'NAMA_KABUPATEN' in df.columns:
-    st.subheader("Rata-rata Skor per Kabupaten")
-    mean_score = df.groupby('NAMA_KABUPATEN')['skor'].mean().reset_index().sort_values(by='skor', ascending=False)
-    fig_bar = px.bar(mean_score, x='NAMA_KABUPATEN', y='skor', labels={'skor': 'Rata-rata Skor'})
-    st.plotly_chart(fig_bar)
+    y_true = df['label_efektivitas']
+    y_encoded = LabelEncoder().fit_transform(y_true)
+    y_pred = model.predict(X_eval_encoded)
 
-# --- Cek Distribusi Label
-st.markdown("---")
-st.subheader("📊 Distribusi Label Efektivitas")
-label_counts = df['label_efektivitas'].value_counts()
-st.bar_chart(label_counts)
-st.write(label_counts)
+    fig_cm, ax_cm = plt.subplots()
+    cm = confusion_matrix(y_encoded, y_pred)
+    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=["Tidak Efektif", "Efektif"])
+    disp.plot(ax=ax_cm, cmap="Blues")
+    st.pyplot(fig_cm)
 
-# === EVALUASI VISUAL MODEL ===
-st.markdown("---")
-st.subheader("📊 Evaluasi Model Random Forest")
+    st.markdown("#### 🔍 Confusion Matrix (Normalized - RF)")
+    cm_norm = confusion_matrix(y_encoded, y_pred, normalize='true')
+    fig_cm_norm, ax_cm_norm = plt.subplots()
+    disp_norm = ConfusionMatrixDisplay(confusion_matrix=cm_norm, display_labels=["Tidak Efektif", "Efektif"])
+    disp_norm.plot(ax=ax_cm_norm, cmap="Blues", values_format=".2f")
+    st.pyplot(fig_cm_norm)
 
-# Encode ulang fitur untuk evaluasi model
-X_eval = df[fitur_kategori].fillna("Tidak Ada")
-X_eval = normalize_kategorikal(X_eval, fitur_kategori)
-X_eval_encoded = X_eval.copy()
-for col in fitur_kategori:
-    X_eval_encoded[col] = le_dict[col].transform(X_eval[col])
+    report = classification_report(y_encoded, y_pred, target_names=["Tidak Efektif", "Efektif"], output_dict=True, zero_division=0)
+    st.markdown("### Metrik Klasifikasi")
+    st.dataframe(pd.DataFrame(report).transpose().round(2))
 
-# Encode label target
-y_true = df['label_efektivitas']
-y_encoded = LabelEncoder().fit_transform(y_true)
-y_pred = model.predict(X_eval_encoded)
+    st.markdown("---")
+    st.subheader("🔍 Feature Importance (Random Forest)")
+    importances = model.feature_importances_
+    importance_df = pd.DataFrame({'Fitur': fitur_kategori, 'Importance': importances}).sort_values(by='Importance', ascending=False)
+    st.dataframe(importance_df)
 
-# Tampilkan Confusion Matrix
-fig_cm, ax_cm = plt.subplots()
-cm = confusion_matrix(y_encoded, y_pred)
-disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=["Tidak Efektif", "Efektif"])
-disp.plot(ax=ax_cm, cmap="Blues")
-st.pyplot(fig_cm)
+with tab2:
+    st.subheader("📊 Evaluasi Model Decision Tree")
+    dt_model = joblib.load("model/decision_tree_model.pkl")
+    y_pred_dt_eval = dt_model.predict(X_eval_encoded)
 
-# --- Normalized Confusion Matrix RF
-st.markdown("#### 🔍 Confusion Matrix (Normalized - RF)")
-cm_norm = confusion_matrix(y_encoded, y_pred, normalize='true')
-fig_cm_norm, ax_cm_norm = plt.subplots()
-disp_norm = ConfusionMatrixDisplay(confusion_matrix=cm_norm, display_labels=["Tidak Efektif", "Efektif"])
-disp_norm.plot(ax=ax_cm_norm, cmap="Blues", values_format=".2f")
-st.pyplot(fig_cm_norm)
+    fig_cm_dt, ax_cm_dt = plt.subplots()
+    cm_dt = confusion_matrix(y_encoded, y_pred_dt_eval)
+    ConfusionMatrixDisplay(cm_dt, display_labels=["Tidak Efektif", "Efektif"]).plot(ax=ax_cm_dt, cmap="Purples")
+    st.pyplot(fig_cm_dt)
 
-# Tampilkan Classification Report
-report = classification_report(y_encoded, y_pred, target_names=["Tidak Efektif", "Efektif"], output_dict=True, zero_division=0)
-st.markdown("### Metrik Klasifikasi")
-st.dataframe(pd.DataFrame(report).transpose().round(2))
+    st.markdown("#### 🔍 Confusion Matrix (Normalized - DT)")
+    cm_dt_norm = confusion_matrix(y_encoded, y_pred_dt_eval, normalize='true')
+    fig_cm_dt_norm, ax_cm_dt_norm = plt.subplots()
+    disp_dt_norm = ConfusionMatrixDisplay(confusion_matrix=cm_dt_norm, display_labels=["Tidak Efektif", "Efektif"])
+    disp_dt_norm.plot(ax=ax_cm_dt_norm, cmap="Purples", values_format=".2f")
+    st.pyplot(fig_cm_dt_norm)
 
-# --- Feature Importance RF
-st.markdown("---")
-st.subheader("🔍 Feature Importance (Random Forest)")
-importances = model.feature_importances_
-importance_df = pd.DataFrame({
-    'Fitur': fitur_kategori,
-    'Importance': importances
-}).sort_values(by='Importance', ascending=False)
-st.dataframe(importance_df)
+    report_dt_eval = classification_report(y_encoded, y_pred_dt_eval, target_names=["Tidak Efektif", "Efektif"], output_dict=True, zero_division=0)
+    st.markdown("### Metrik Klasifikasi Decision Tree")
+    st.dataframe(pd.DataFrame(report_dt_eval).transpose().round(2))
 
-# === PERBANDINGAN MODEL: Decision Tree vs Random Forest ===
-# Load model Decision Tree (karena model Random Forest sudah aktif di variable 'model')
-dt_model = joblib.load("model/decision_tree_model.pkl")
-# === EVALUASI MODEL DECISION TREE ===
-st.subheader("📊 Evaluasi Model Decision Tree")
+with tab3:
+    st.subheader("📊 Perbandingan F1-Score Decision Tree vs Random Forest")
+    report_dt = classification_report(y_encoded, y_pred_dt_eval, output_dict=True, zero_division=0)
+    report_rf = classification_report(y_encoded, y_pred, output_dict=True, zero_division=0)
 
-# Prediksi ulang
-y_pred_dt_eval = dt_model.predict(X_eval_encoded)
+    df_compare = pd.DataFrame({
+        "Decision Tree": pd.DataFrame(report_dt).transpose().round(2)["f1-score"],
+        "Random Forest": pd.DataFrame(report_rf).transpose().round(2)["f1-score"]
+    })
+    st.dataframe(df_compare)
 
-# Confusion Matrix
-fig_cm_dt, ax_cm_dt = plt.subplots()
-cm_dt = confusion_matrix(y_encoded, y_pred_dt_eval)
-ConfusionMatrixDisplay(cm_dt, display_labels=["Tidak Efektif", "Efektif"]).plot(ax=ax_cm_dt, cmap="Purples")
-st.pyplot(fig_cm_dt)
+    st.markdown("### 📈 Visualisasi Perbandingan F1-Score")
+    fig, ax = plt.subplots(figsize=(10, 4))
+    df_compare.plot(kind='bar', ax=ax)
+    ax.set_ylabel("F1-Score")
+    ax.set_title("Perbandingan F1-Score per Kelas")
+    st.pyplot(fig)
 
-# --- Normalized Confusion Matrix DT
-st.markdown("#### 🔍 Confusion Matrix (Normalized - DT)")
-cm_dt_norm = confusion_matrix(y_encoded, y_pred_dt_eval, normalize='true')
-fig_cm_dt_norm, ax_cm_dt_norm = plt.subplots()
-disp_dt_norm = ConfusionMatrixDisplay(confusion_matrix=cm_dt_norm, display_labels=["Tidak Efektif", "Efektif"])
-disp_dt_norm.plot(ax=ax_cm_dt_norm, cmap="Purples", values_format=".2f")
-st.pyplot(fig_cm_dt_norm)
+with tab4:
+    st.subheader("📤 Unduhan Evaluasi & Hasil Prediksi")
+    if st.button("⬇️ Download Evaluasi Random Forest ke Excel"):
+        report_df = pd.DataFrame(report).transpose().round(2)
+        towrite = io.BytesIO()
+        with pd.ExcelWriter(towrite, engine='xlsxwriter') as writer:
+            report_df.to_excel(writer, sheet_name="Evaluasi RF")
+            pd.DataFrame(cm).to_excel(writer, sheet_name="Confusion Matrix")
+        towrite.seek(0)
+        st.download_button(
+            label="📄 Klik untuk Unduh Evaluasi RF",
+            data=towrite,
+            file_name="evaluasi_random_forest.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
-# Classification Report
-report_dt_eval = classification_report(y_encoded, y_pred_dt_eval, target_names=["Tidak Efektif", "Efektif"], output_dict=True, zero_division=0)
-st.markdown("### Metrik Klasifikasi Decision Tree")
-st.dataframe(pd.DataFrame(report_dt_eval).transpose().round(2))
+    if st.button("⬇️ Download Evaluasi Decision Tree ke Excel"):
+        report_dt_df = pd.DataFrame(report_dt_eval).transpose().round(2)
+        towrite_dt = io.BytesIO()
+        with pd.ExcelWriter(towrite_dt, engine='xlsxwriter') as writer:
+            report_dt_df.to_excel(writer, sheet_name="Evaluasi DT")
+            pd.DataFrame(cm_dt).to_excel(writer, sheet_name="Confusion Matrix")
+        towrite_dt.seek(0)
+        st.download_button(
+            label="📄 Klik untuk Unduh Evaluasi DT",
+            data=towrite_dt,
+            file_name="evaluasi_decision_tree.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
-# --- Tombol Download Evaluasi DT ke Excel
-if st.button("⬇️ Download Evaluasi Decision Tree ke Excel"):
-    report_dt_df = pd.DataFrame(report_dt_eval).transpose().round(2)
-    towrite_dt = io.BytesIO()
-    with pd.ExcelWriter(towrite_dt, engine='xlsxwriter') as writer:
-        report_dt_df.to_excel(writer, sheet_name="Evaluasi DT")
-        pd.DataFrame(cm_dt).to_excel(writer, sheet_name="Confusion Matrix")
-    towrite_dt.seek(0)
-    st.download_button(
-        label="📄 Klik untuk Unduh Evaluasi DT",
-        data=towrite_dt,
-        file_name="evaluasi_decision_tree.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+    if st.button("⬇️ Download Perbandingan ke Excel"):
+        towrite2 = io.BytesIO()
+        with pd.ExcelWriter(towrite2, engine='xlsxwriter') as writer:
+            df_compare.to_excel(writer, sheet_name="F1_Perbandingan")
+        towrite2.seek(0)
+        st.download_button(
+            label="📄 Klik untuk Unduh Perbandingan",
+            data=towrite2,
+            file_name="perbandingan_model_dt_rf.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
-# Prediksi ulang untuk perbandingan
-y_pred_dt = dt_model.predict(X_eval_encoded)
-y_pred_rf = model.predict(X_eval_encoded)
+    if st.button("🖨️ Export Evaluasi ke PDF"):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cm_fig, cm_ax = plt.subplots()
+            ConfusionMatrixDisplay(cm, display_labels=["Tidak Efektif", "Efektif"]).plot(ax=cm_ax, cmap='Blues')
+            cm_path = os.path.join(tmpdir, "confusion_matrix.png")
+            cm_fig.savefig(cm_path, bbox_inches='tight')
 
-# Hitung classification report
-report_dt = classification_report(y_encoded, y_pred_dt, output_dict=True, zero_division=0)
-report_rf = classification_report(y_encoded, y_pred_rf, output_dict=True, zero_division=0)
+            bar_fig, bar_ax = plt.subplots(figsize=(10, 4))
+            df_compare.plot(kind='bar', ax=bar_ax)
+            bar_ax.set_ylabel("F1-Score")
+            bar_ax.set_title("Perbandingan F1-Score DT vs RF")
+            bar_path = os.path.join(tmpdir, "f1_compare.png")
+            bar_fig.savefig(bar_path, bbox_inches='tight')
 
-# Gabungkan f1-score per kelas
-df_compare = pd.DataFrame({
-    "Decision Tree": pd.DataFrame(report_dt).transpose().round(2)["f1-score"],
-    "Random Forest": pd.DataFrame(report_rf).transpose().round(2)["f1-score"]
-})
+            pdf = FPDF()
+            pdf.add_page()
+            pdf.set_font("Arial", size=12)
 
-# Tampilkan
-st.markdown("---")
-st.subheader("📊 Perbandingan F1-Score Decision Tree vs Random Forest")
-st.dataframe(df_compare)
+            pdf.cell(200, 10, txt="Evaluasi Model Random Forest", ln=True, align="C")
+            pdf.image(cm_path, x=10, y=30, w=180)
+            pdf.ln(95)
 
-# Plot perbandingan f1-score
-st.markdown("### 📈 Visualisasi Perbandingan F1-Score")
-fig, ax = plt.subplots(figsize=(10, 4))
-df_compare.plot(kind='bar', ax=ax)
-ax.set_ylabel("F1-Score")
-ax.set_title("Perbandingan F1-Score per Kelas")
-st.pyplot(fig)
+            pdf.cell(200, 10, txt="Perbandingan F1-Score DT vs RF", ln=True, align="C")
+            pdf.image(bar_path, x=10, y=135, w=180)
 
-# --- Distribusi Probabilitas Prediksi RF
-st.markdown("---")
-st.subheader("📉 Distribusi Probabilitas Prediksi (RF)")
-probas = model.predict_proba(X_eval_encoded)
-fig_prob, ax_prob = plt.subplots()
-ax_prob.hist(probas[:, 1], bins=20, color='skyblue')
-ax_prob.set_title("Distribusi Probabilitas Prediksi - Kelas Efektif")
-ax_prob.set_xlabel("Probabilitas Prediksi Efektif")
-ax_prob.set_ylabel("Jumlah Desa")
-st.pyplot(fig_prob)
+            pdf_path = os.path.join(tmpdir, "evaluasi_stunting.pdf")
+            pdf.output(pdf_path)
 
-
-if st.button("🖨️ Export Evaluasi ke PDF"):
-    with tempfile.TemporaryDirectory() as tmpdir:
-        # Simpan confusion matrix sebagai gambar
-        cm_fig, cm_ax = plt.subplots()
-        ConfusionMatrixDisplay(cm, display_labels=["Tidak Efektif", "Efektif"]).plot(ax=cm_ax, cmap='Blues')
-        cm_path = os.path.join(tmpdir, "confusion_matrix.png")
-        cm_fig.savefig(cm_path, bbox_inches='tight')
-
-        # Simpan bar chart perbandingan
-        bar_fig, bar_ax = plt.subplots(figsize=(10, 4))
-        df_compare.plot(kind='bar', ax=bar_ax)
-        bar_ax.set_ylabel("F1-Score")
-        bar_ax.set_title("Perbandingan F1-Score DT vs RF")
-        bar_path = os.path.join(tmpdir, "f1_compare.png")
-        bar_fig.savefig(bar_path, bbox_inches='tight')
-
-        # Buat PDF
-        pdf = FPDF()
-        pdf.add_page()
-        pdf.set_font("Arial", size=12)
-
-        pdf.cell(200, 10, txt="Evaluasi Model Random Forest", ln=True, align="C")
-        pdf.image(cm_path, x=10, y=30, w=180)
-        pdf.ln(95)
-
-        pdf.cell(200, 10, txt="Perbandingan F1-Score DT vs RF", ln=True, align="C")
-        pdf.image(bar_path, x=10, y=135, w=180)
-
-        pdf_path = os.path.join(tmpdir, "evaluasi_stunting.pdf")
-        pdf.output(pdf_path)
-
-        with open(pdf_path, "rb") as f:
-            st.download_button(
-                label="📄 Unduh Evaluasi PDF",
-                data=f,
-                file_name="evaluasi_stunting.pdf",
-                mime="application/pdf"
-            )
-
-# Tombol unduh
-st.markdown("---")
-if st.button("⬇️ Download Perbandingan ke Excel"):
-    towrite2 = io.BytesIO()
-    with pd.ExcelWriter(towrite2, engine='xlsxwriter') as writer:
-        df_compare.to_excel(writer, sheet_name="F1_Perbandingan")
-    towrite2.seek(0)
-    st.download_button(
-        label="📄 Klik untuk Unduh Perbandingan",
-        data=towrite2,
-        file_name="perbandingan_model_dt_rf.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
-
-
-
-# Export Hasil Evaluasi ke Excel
-st.markdown("---")
-if st.button("⬇️ Download Evaluasi ke Excel"):
-    report_df = pd.DataFrame(report).transpose().round(2)
-
-    towrite = io.BytesIO()
-    with pd.ExcelWriter(towrite, engine='xlsxwriter') as writer:
-        report_df.to_excel(writer, sheet_name="Evaluasi RF")
-        pd.DataFrame(cm).to_excel(writer, sheet_name="Confusion Matrix")
-
-    towrite.seek(0)
-    st.download_button(
-        label="📄 Klik untuk Unduh Evaluasi",
-        data=towrite,
-        file_name="evaluasi_random_forest.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
-
-# --- Export ke Excel
-st.markdown("---")
-if st.button("⬇️ Download Hasil Prediksi ke Excel"):
-    export_df = df[['NAMA_KABUPATEN', 'NAMA_KECAMATAN', 'NAMA_DESA'] + fitur_kategori + ['Prediksi_Model']]
-    towrite = io.BytesIO()
-    with pd.ExcelWriter(towrite, engine='xlsxwriter') as writer:
-        export_df.to_excel(writer, index=False, sheet_name="Hasil Prediksi")
-    towrite.seek(0)
-    st.download_button(
-        label="Klik untuk Unduh",
-        data=towrite,
-        file_name=f"hasil_prediksi_stunting_{datetime.now().strftime('%Y%m%d')}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+            with open(pdf_path, "rb") as f:
+                st.download_button(
+                    label="📄 Unduh Evaluasi PDF",
+                    data=f,
+                    file_name="evaluasi_stunting.pdf",
+                    mime="application/pdf"
+                )
