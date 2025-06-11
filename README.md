@@ -8,7 +8,7 @@
 
 ## 📊 Deskripsi
 
-Proyek ini merupakan aplikasi klasifikasi berbasis _machine learning_ yang bertujuan untuk memprediksi efektivitas intervensi stunting berdasarkan data layanan desa. Dibangun menggunakan Python dan Streamlit, proyek ini mengadopsi model _Decision Tree_ dan _Random Forest_ untuk mengevaluasi keberhasilan konvergensi stunting di desa berdasarkan data tahun 2023 dari Kementerian Desa PDTT.
+Proyek ini merupakan bagian dari skripsi S1 Informatika dengan. Proyek ini merupakan aplikasi klasifikasi berbasis _machine learning_ yang bertujuan untuk memprediksi efektivitas intervensi stunting berdasarkan data layanan desa. Dibangun menggunakan Python dan Streamlit, proyek ini mengadopsi model _Decision Tree_ dan _Random Forest_ untuk mengevaluasi keberhasilan konvergensi stunting di desa berdasarkan data tahun 2023 dari Kementerian Desa PDTT.
 
 ---
 
@@ -19,6 +19,7 @@ skripsi_stunting/
 │   README.md
 │   main.py
 │   requirements.txt
+|   test_env.py
 │
 ├───data/
 │   ├── jumlah-penerima-layanan-pencegahan-stunting-tahun-2023.xlsx
@@ -97,6 +98,14 @@ streamlit run streamlit_app/app.py
 
 ---
 
+## ⚙️ Kebutuhan Environment
+
+Lihat file `requirements.txt` atau gunakan `test_env.py` untuk memverifikasi environment yang dibutuhkan:
+
+```bash
+python test_env.py
+```
+
 ## 🌐 Dependencies Utama
 
 - pandas, numpy
@@ -106,6 +115,44 @@ streamlit run streamlit_app/app.py
 - streamlit, fpdf
 
 ---
+
+## 🧠 Model & Algoritma
+
+- Decision Tree Classifier
+- Random Forest Classifier
+- Label Encoding untuk fitur kategorikal
+- SHAP untuk interpretasi model
+- Evaluasi: Confusion Matrix, Classification Report, F1-Score, Distribusi Probabilitas
+
+## 🧪 Dokumentasi Teknis
+
+### `model_training.py`
+
+- `train_model_rf(X, y)` — latih model Random Forest dan simpan ke `.pkl`
+- `train_model_dt(X, y)` — latih model Decision Tree dan simpan ke `.pkl`
+
+### `encoder_utils.py`
+
+- `fit_label_encoders(df, fitur_kat)` — latih `LabelEncoder` untuk setiap kolom
+- `normalize_kategorikal(df, fitur_kat)` — normalisasi nilai kategorikal
+
+### `evaluation.py`
+
+- `evaluate_model(model, X, y)` — kembalikan `classification_report`, `confusion_matrix`
+
+### `shap_utils.py`
+
+- `generate_shap_plot(...)` — kembalikan grafik SHAP interpretasi fitur
+
+### `form_utils.py`
+
+- `encode_manual_input()` — encoding untuk form manual input
+
+## 🤝 Acknowledgement
+
+- Kementerian Desa, Pembangunan Daerah Tertinggal dan Transmigrasi (Kemendesa PDTT) atas data yang digunakan
+- Dosen Pembimbing dan Departemen Informatika
+- Pengembang pustaka open-source seperti Streamlit, Scikit-learn, SHAP, dan lainnya
 
 ## 🎓 Kontak Penulis
 
@@ -128,3 +175,7 @@ Repositori ini dibuat untuk kepentingan tugas akhir dan bersifat terbuka untuk t
 - Scikit-Learn Documentation
 - SHAP Explainability
 - Streamlit Documentation
+- Géron, A. (2019). _Hands-On Machine Learning with Scikit-Learn, Keras & TensorFlow_
+- Lundberg, S. M., & Lee, S.-I. (2017). _A Unified Approach to Interpreting Model Predictions_ (SHAP)
+
+Untuk pertanyaan atau kolaborasi, silakan hubungi melalui GitHub Issues atau kontak penulis skripsi.
