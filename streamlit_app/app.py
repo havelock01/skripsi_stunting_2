@@ -6,7 +6,6 @@ import streamlit as st
 import pandas as pd
 import joblib
 import matplotlib.pyplot as plt
-import plotly.express as px
 import shap
 import io
 from datetime import datetime
@@ -44,6 +43,15 @@ dummy_features = [
     'Terdapat_Pengembangan_Program_Ketahanan_Pangan'
 ]
 
+# Fungsi untuk encoding fitur
+def encode_features(df, le_dict, features):
+    df_enc = df[features].fillna("Tidak Ada").apply(lambda col: col.str.strip().str.lower())
+    for col in features:
+        # Mapping nilai yang tidak ada di encoder ke kelas pertama
+        df_enc[col] = df_enc[col].where(df_enc[col].isin(le_dict[col].classes_), le_dict[col].classes_[0])
+        df_enc[col] = le_dict[col].transform(df_enc[col])
+    return df_enc
+
 # --- Encode seluruh dataset untuk prediksi otomatis
 X_raw, le_dict = fit_label_encoders(df[dummy_features].copy(), dummy_features)
 pred_enc = model_rf.predict(X_raw)
@@ -62,7 +70,20 @@ st.subheader("Data dan Prediksi")
 display_cols = ['NAMA_DESA'] + dummy_features + ['Prediksi_Model']
 st.dataframe(df[display_cols].reset_index(drop=True))
 
-# --- SHAP Interpretation
+# --- SHAP Global (Sidebar)
+with st.sidebar.expander("Interpretasi SHAP (Global)", expanded=False):
+    X_disp = df[dummy_features].fillna("Tidak Ada")
+    for col in dummy_features:
+        X_disp[col] = X_disp[col].where(X_disp[col].isin(le_dict[col].classes_), le_dict[col].classes_[0])
+    X_disp_enc = pd.DataFrame({col: le_dict[col].transform(X_disp[col]) for col in dummy_features})
+    explainer = shap.TreeExplainer(model_rf)
+    shap_values = explainer.shap_values(X_disp_enc)
+    st.markdown("#### SHAP Summary Plot (Global)")
+    fig_shap, ax_shap = plt.subplots()
+    shap.summary_plot(shap_values, X_disp_enc, feature_names=dummy_features, show=False)
+    st.pyplot(fig_shap)
+
+# --- SHAP Instance (Main Panel)
 st.sidebar.markdown("---")
 selected_class = st.sidebar.radio("Interpretasi SHAP untuk kelas:", labels)
 selected_idx = labels.index(selected_class)
@@ -71,22 +92,39 @@ st.subheader("Interpretasi SHAP")
 idx = st.number_input("Pilih index desa (0-n)", min_value=0, max_value=len(df)-1, value=0)
 st.markdown(f"**Nama Desa:** {df.iloc[idx]['NAMA_DESA']}")
 
-# encode display subset
-X_disp = df[dummy_features].fillna("Tidak Ada")
-for col in dummy_features:
-    X_disp[col] = X_disp[col].where(X_disp[col].isin(le_dict[col].classes_), le_dict[col].classes_[0])
-X_encoded_disp = pd.DataFrame({col: le_dict[col].transform(X_disp[col]) for col in dummy_features})
-fig_shap, _, _ = generate_shap_plot(model_rf, X_encoded_disp, idx, selected_idx, dummy_features)
-st.pyplot(fig_shap)
+fig_shap_instance, _, _ = generate_shap_plot(model_rf, X_disp_enc, idx, selected_idx, dummy_features)
+st.pyplot(fig_shap_instance)
 
-# --- Manual Input Form
+# --- Manual Input Form (dropdown seimbang & label singkat)
 st.subheader("Prediksi Manual")
+col_count = len(dummy_features)
+cols = st.columns(col_count, gap="medium")  # gunakan gap agar lebih rapi
+manual_input = {}
+
+# Label singkat untuk tampilan
+label_map = {
+    dummy_features[0]: "Monitoring/Evaluasi",
+    dummy_features[1]: "Posyandu",
+    dummy_features[2]: "RDS/TPPS",
+    dummy_features[3]: "Peningkatan Kapasitas",
+    dummy_features[4]: "Ketahanan Pangan"
+}
+
 with st.form("manual_form"):
-    manual_input = {col: st.selectbox(col, ["Ada", "Tidak Ada", "Rutin Tiap Bulan"], key=col) for col in dummy_features}
+    for i, col in enumerate(dummy_features):
+        opsi = sorted(df[col].dropna().unique().tolist())
+        manual_input[col] = cols[i].selectbox(label_map.get(col, col), opsi, key=f"manual_{col}")
     submit = st.form_submit_button("Prediksi Efektivitas")
 
 if submit:
-    df_enc = encode_manual_input(manual_input, le_dict, dummy_features)
+    df_enc = pd.DataFrame([manual_input])
+    # Normalisasi manual input agar sama dengan training
+    df_enc = df_enc.apply(lambda col: col.str.strip().str.lower())
+    # Pastikan semua nilai ada di encoder, jika tidak mapping ke kelas pertama
+    for col in dummy_features:
+        df_enc[col] = df_enc[col].where(df_enc[col].isin(le_dict[col].classes_), le_dict[col].classes_[0])
+    df_enc = pd.DataFrame({col: le_dict[col].transform(df_enc[col]) for col in dummy_features})
+
     st.markdown("🔍 **Hasil encoding input manual:**")
     st.dataframe(df_enc)
 
@@ -114,13 +152,10 @@ tab1, tab2, tab3, tab4 = st.tabs(["📉 Random Forest", "🌳 Decision Tree", "�
 
 with tab1:
     st.subheader("📊 Evaluasi Model Random Forest")
-    X_eval = df[dummy_features].fillna("Tidak Ada")
-    X_eval = normalize_kategorikal(X_eval, dummy_features)
-    X_eval_enc = pd.DataFrame({col: le_dict[col].transform(X_eval[col]) for col in dummy_features})
-
+    X_eval = encode_features(df, le_dict, dummy_features)
     y_true = df['label_efektivitas']
     y_enc = le_label.transform(y_true)
-    y_pred = model_rf.predict(X_eval_enc)
+    y_pred = model_rf.predict(X_eval)
 
     # Ambil label unik setelah filter
     unique_labels_rf = sorted(list(set(y_enc) | set(y_pred)))
@@ -145,38 +180,35 @@ with tab1:
     st.dataframe(pd.DataFrame(report_rf).transpose().round(2))
 
     # Feature Importance
-    st.subheader("🔍 Feature Importance RF")
-    imp = model_rf.feature_importances_
-    df_imp = pd.DataFrame({'Fitur': dummy_features, 'Importance': imp}).sort_values('Importance', ascending=False)
-    st.dataframe(df_imp)
+    st.markdown("### 🔍 Feature Importance RF")
+    feat_imp = pd.DataFrame({
+        "Fitur": dummy_features,
+        "Importance": model_rf.feature_importances_
+    }).sort_values("Importance", ascending=False)
+    st.dataframe(feat_imp)
 
 with tab2:
     st.subheader("📊 Evaluasi Model Decision Tree")
-    y_pred_dt = model_dt.predict(X_eval_enc)
+    y_pred_dt = model_dt.predict(X_eval)
+    unique_labels_dt = sorted(list(set(y_enc) | set(y_pred_dt)))
+    display_labels_dt = [labels[i] for i in unique_labels_dt]
 
-    # Ambil label unik setelah filter
-    unique_labels = sorted(list(set(y_enc) | set(y_pred_dt)))
-    display_labels = [labels[i] for i in unique_labels]
-
-    # Confusion Matrix DT
     fig_dt, ax_dt = plt.subplots()
     ConfusionMatrixDisplay(
-        confusion_matrix=confusion_matrix(y_enc, y_pred_dt, labels=unique_labels),
-        display_labels=display_labels
+        confusion_matrix=confusion_matrix(y_enc, y_pred_dt, labels=unique_labels_dt),
+        display_labels=display_labels_dt
     ).plot(ax=ax_dt)
     st.pyplot(fig_dt)
 
-    # Normalized Confusion Matrix DT
     st.markdown("#### Confusion Matrix DT (Normalized)")
     fig_dt_n, ax_dt_n = plt.subplots()
     ConfusionMatrixDisplay(
-        confusion_matrix=confusion_matrix(y_enc, y_pred_dt, labels=unique_labels, normalize='true'),
-        display_labels=display_labels
+        confusion_matrix=confusion_matrix(y_enc, y_pred_dt, labels=unique_labels_dt, normalize='true'),
+        display_labels=display_labels_dt
     ).plot(ax=ax_dt_n, values_format='.2f')
     st.pyplot(fig_dt_n)
 
-    # Classification Report DT
-    report_dt = classification_report(y_enc, y_pred_dt, target_names=display_labels, output_dict=True, zero_division=0)
+    report_dt = classification_report(y_enc, y_pred_dt, labels=unique_labels_dt, target_names=display_labels_dt, output_dict=True, zero_division=0)
     st.markdown("### Metrik Klasifikasi DT")
     st.dataframe(pd.DataFrame(report_dt).transpose().round(2))
 
@@ -200,18 +232,18 @@ with tab4:
         towrite = io.BytesIO()
         with pd.ExcelWriter(towrite, engine='xlsxwriter') as writer:
             pd.DataFrame(report_rf).transpose().round(2).to_excel(writer, sheet_name="Evaluasi_RF")
-            pd.DataFrame(confusion_matrix(y_enc, y_pred), index=labels, columns=labels).to_excel(writer, sheet_name="Confusion_Matrix_RF")
+            pd.DataFrame(cm, index=display_labels_rf, columns=display_labels_rf).to_excel(writer, sheet_name="Confusion_Matrix_RF")
         towrite.seek(0)
         st.download_button("📄 Unduh Evaluasi RF", data=towrite, file_name="evaluasi_rf.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
     # Download Evaluasi DT
     if st.button("⬇️ Download Evaluasi Decision Tree ke Excel"):
-        towrite_dt = io.BytesIO()
-        with pd.ExcelWriter(towrite_dt, engine='xlsxwriter') as writer:
+        towrite = io.BytesIO()
+        with pd.ExcelWriter(towrite, engine='xlsxwriter') as writer:
             pd.DataFrame(report_dt).transpose().round(2).to_excel(writer, sheet_name="Evaluasi_DT")
-            pd.DataFrame(confusion_matrix(y_enc, y_pred_dt), index=labels, columns=labels).to_excel(writer, sheet_name="Confusion_Matrix_DT")
-        towrite_dt.seek(0)
-        st.download_button("📄 Unduh Evaluasi DT", data=towrite_dt, file_name="evaluasi_dt.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            pd.DataFrame(confusion_matrix(y_enc, y_pred_dt, labels=unique_labels_dt), index=display_labels_dt, columns=display_labels_dt).to_excel(writer, sheet_name="Confusion_Matrix_DT")
+        towrite.seek(0)
+        st.download_button("📄 Unduh Evaluasi DT", data=towrite, file_name="evaluasi_dt.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
     # Download Perbandingan F1
     if st.button("⬇️ Download Perbandingan ke Excel"):

@@ -3,7 +3,9 @@ import joblib
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
+from imblearn.over_sampling import SMOTE
 from sklearn.preprocessing import LabelEncoder
+import numpy as np
 
 # --- Load dataset
 file_path = "data/stunting_2023_labeled.csv"
@@ -28,23 +30,46 @@ for col in fitur_kategori:
     le_dict[col] = le
 
 # Encode label target
-y = df['label_efektivitas']
-y = LabelEncoder().fit_transform(y)
+label_le = LabelEncoder()
+y = label_le.fit_transform(df['label_efektivitas'])
+
+# Tampilkan distribusi label sebelum split
+print("Distribusi label sebelum split:")
+for i, label in enumerate(label_le.classes_):
+    print(f"{label}: {(y == i).sum()}")
 
 # Split data
 X_train, X_test, y_train, y_test = train_test_split(
     X, y,
     test_size=0.2,
     random_state=42,
-    stratify=df['label_efektivitas']
+    stratify=y
 )
 
-# --- Train Decision Tree
+# Tampilkan distribusi label pada data train sebelum oversampling
+print("\nDistribusi label pada data train sebelum oversampling:")
+for i, label in enumerate(label_le.classes_):
+    print(f"{label}: {(y_train == i).sum()}")
+
+# Oversample data train
+smote = SMOTE(random_state=42)
+X_train_bal, y_train_bal = smote.fit_resample(X_train, y_train)
+
+# Tampilkan distribusi label pada data train setelah oversampling
+print("\nDistribusi label pada data train setelah SMOTE:")
+for i, label in enumerate(label_le.classes_):
+    print(f"{label}: {(y_train_bal == i).sum()}")
+
+# --- Train Decision Tree (pakai data hasil oversampling)
 dt_model = DecisionTreeClassifier(random_state=42)
-dt_model.fit(X_train, y_train)
+dt_model.fit(X_train_bal, y_train_bal)
 joblib.dump(dt_model, "model/decision_tree_model.pkl")
 
-# --- Train Random Forest with class_weight balancing
+# --- Train Random Forest (pakai data hasil oversampling)
 rf_model = RandomForestClassifier(n_estimators=100, random_state=42, class_weight='balanced')
-rf_model.fit(X_train, y_train)
+rf_model.fit(X_train_bal, y_train_bal)
 joblib.dump(rf_model, "model/random_forest_model.pkl")
+
+# --- Simpan LabelEncoder untuk fitur dan target
+joblib.dump(le_dict, "model/feature_label_encoders.pkl")
+joblib.dump(label_le, "model/target_label_encoder.pkl")
