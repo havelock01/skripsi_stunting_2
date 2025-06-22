@@ -32,7 +32,12 @@ y = df['label_efektivitas']
 y = LabelEncoder().fit_transform(y)
 
 # Split data
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y,
+    test_size=0.2,
+    random_state=42,
+    stratify=df['label_efektivitas']
+)
 
 # --- Train Decision Tree
 dt_model = DecisionTreeClassifier(random_state=42)

@@ -28,14 +28,28 @@ indikator_kunci = [
 df[indikator_kunci] = df[indikator_kunci].fillna("Tidak Ada")
 
 # 4. Hitung skor (berapa banyak indikator aktif per desa)
-df['skor'] = df[indikator_kunci].apply(
-    lambda row: sum(row == "Ada") + sum(row == "Rutin Tiap Bulan"), axis=1
-)
+df['label_efektivitas'] = df.apply(
+        lambda row: "Efektif"
+        if row['skor'] >= 3 and row.get('Jumlah_alokasi_anggaran_untuk_mendukung_kegiatan_stunting', 0) > 0
+        else "Tidak Efektif",
+        axis=1
+    )
 
-# 5. Bentuk label klasifikasi berdasarkan skor
-df['label_efektivitas'] = df['skor'].apply(
-    lambda x: "Efektif" if x >= 4 else "Tidak Efektif"
-)
+# 5. Fungsi untuk memberi kategori berdasarkan skor dan anggaran
+def categorize(row):
+    anggaran = row.get('Jumlah_alokasi_anggaran_untuk_mendukung_kegiatan_stunting', 0)
+    if anggaran > 0:
+        if row['skor'] >= 3:
+            return "Efektif"
+        elif row['skor'] >= 1:
+            return "Cukup Efektif"
+        else:
+            return "Kurang Efektif"
+    else:
+        return "Kurang Efektif"
+
+# Terapkan kategori
+df['label_efektivitas'] = df.apply(categorize, axis=1)
 
 # 6. Simpan hasil ke file baru
 output_file = "data/stunting_2023_labeled.csv"
