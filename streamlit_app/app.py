@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import shap
 import io
 from datetime import datetime
+import numpy as np
 
 from encoder_utils import fit_label_encoders, normalize_kategorikal
 from shap_utils import generate_shap_plot
@@ -27,12 +28,13 @@ st.title("Klasifikasi Efektivitas Intervensi Stunting di Desa")
 # --- Load model & data
 model_rf = joblib.load("model/random_forest_model.pkl")
 model_dt = joblib.load("model/decision_tree_model.pkl")
+model_bal_rf = joblib.load("model/balanced_random_forest_model.pkl")
 df = pd.read_csv("data/stunting_2023_labeled.csv")
 
 # --- Fit LabelEncoder untuk target
 y_label = df['label_efektivitas']
 le_label = LabelEncoder().fit(y_label)
-labels = le_label.classes_.tolist()
+labels = list(le_label.classes_) if hasattr(le_label, 'classes_') and le_label.classes_ is not None else []
 
 # --- Fitur kategori indikator
 dummy_features = [
@@ -68,12 +70,20 @@ if 'NAMA_KABUPATEN' in df.columns:
 # --- Tampilkan Data & Prediksi
 st.subheader("Data dan Prediksi")
 display_cols = ['NAMA_DESA'] + dummy_features + ['Prediksi_Model']
-st.dataframe(df[display_cols].reset_index(drop=True))
+df_display = df[display_cols]
+if not isinstance(df_display, pd.DataFrame):
+    df_display = pd.DataFrame(df_display, columns=pd.Index(display_cols))
+st.dataframe(df_display.reset_index(drop=True))
 
 # --- SHAP Global (Sidebar)
 with st.sidebar.expander("Interpretasi SHAP (Global)", expanded=False):
-    X_disp = df[dummy_features].fillna("Tidak Ada")
+    X_disp = df[dummy_features]
+    if not isinstance(X_disp, pd.DataFrame):
+        X_disp = pd.DataFrame(X_disp, columns=pd.Index(dummy_features))
+    X_disp = X_disp.fillna("Tidak Ada")
     for col in dummy_features:
+        if not isinstance(X_disp[col], pd.Series):
+            X_disp[col] = pd.Series(X_disp[col])
         X_disp[col] = X_disp[col].where(X_disp[col].isin(le_dict[col].classes_), le_dict[col].classes_[0])
     X_disp_enc = pd.DataFrame({col: le_dict[col].transform(X_disp[col]) for col in dummy_features})
     explainer = shap.TreeExplainer(model_rf)
@@ -98,10 +108,9 @@ st.pyplot(fig_shap_instance)
 # --- Manual Input Form (dropdown seimbang & label singkat)
 st.subheader("Prediksi Manual")
 col_count = len(dummy_features)
-cols = st.columns(col_count, gap="medium")  # gunakan gap agar lebih rapi
+cols = st.columns(col_count, gap="medium")
 manual_input = {}
 
-# Label singkat untuk tampilan
 label_map = {
     dummy_features[0]: "Monitoring/Evaluasi",
     dummy_features[1]: "Posyandu",
@@ -110,10 +119,12 @@ label_map = {
     dummy_features[4]: "Ketahanan Pangan"
 }
 
+# Opsi yang sudah dinormalisasi
+opsi_valid = ["Ada", "Tidak Ada", "Rutin Tiap Bulan"]
+
 with st.form("manual_form"):
     for i, col in enumerate(dummy_features):
-        opsi = sorted(df[col].dropna().unique().tolist())
-        manual_input[col] = cols[i].selectbox(label_map.get(col, col), opsi, key=f"manual_{col}")
+        manual_input[col] = cols[i].selectbox(label_map.get(col, col), opsi_valid, key=f"manual_{col}")
     submit = st.form_submit_button("Prediksi Efektivitas")
 
 if submit:
@@ -122,7 +133,14 @@ if submit:
     df_enc = df_enc.apply(lambda col: col.str.strip().str.lower())
     # Pastikan semua nilai ada di encoder, jika tidak mapping ke kelas pertama
     for col in dummy_features:
-        df_enc[col] = df_enc[col].where(df_enc[col].isin(le_dict[col].classes_), le_dict[col].classes_[0])
+        df_enc[col] = df_enc[col].astype(str)
+        if not isinstance(df_enc[col], pd.Series):
+            df_enc[col] = pd.Series(df_enc[col])
+        try:
+            df_enc[col] = df_enc[col].where(df_enc[col].isin(le_dict[col].classes_), le_dict[col].classes_[0])  # type: ignore
+        except Exception:
+            df_enc[col] = pd.Series(list(df_enc[col]))
+            df_enc[col] = df_enc[col].apply(lambda x: x if x in le_dict[col].classes_ else le_dict[col].classes_[0])  # type: ignore
     df_enc = pd.DataFrame({col: le_dict[col].transform(df_enc[col]) for col in dummy_features})
 
     st.markdown("🔍 **Hasil encoding input manual:**")
@@ -134,21 +152,29 @@ if submit:
         st.text(f"{col}: {dict(zip(le.classes_, le.transform(le.classes_)))}")
 
     pred_m = model_rf.predict(df_enc)[0]
-    label_m = le_label.inverse_transform([pred_m])[0]
+    label_m = le_label.inverse_transform([pred_m])[0] if pred_m is not None and hasattr(le_label, 'inverse_transform') else "-"  # type: ignore
     st.success(f"Prediksi: **{label_m}**")
 
     expl = shap.TreeExplainer(model_rf).shap_values(df_enc)
+    shap_exp_values = expl[pred_m][0] if expl is not None and pred_m is not None and hasattr(expl, '__getitem__') else []
+    shap_base_values = None
+    explainer = shap.TreeExplainer(model_rf)
+    if pred_m is not None and hasattr(explainer, 'expected_value'):
+        try:
+            shap_base_values = explainer.expected_value[pred_m]  # type: ignore
+        except Exception:
+            shap_base_values = None
     fig, ax = plt.subplots()
     shap.plots.waterfall(shap.Explanation(
-        values=expl[pred_m][0],
-        base_values=shap.TreeExplainer(model_rf).expected_value[pred_m],
-        data=df_enc.iloc[0],
+        values=shap_exp_values,
+        base_values=shap_base_values,
+        data=df_enc.iloc[0] if len(df_enc) > 0 else None,
         feature_names=dummy_features
     ), show=False)
     st.pyplot(fig)
 
 # === Tabs Evaluasi ===
-tab1, tab2, tab3, tab4 = st.tabs(["📉 Random Forest", "🌳 Decision Tree", "⚖️ Perbandingan", "📤 Unduhan"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["📉 Random Forest", "🌳 Decision Tree", "⚖️ Perbandingan", "📤 Unduhan", "⚖️ Balanced RF"])
 
 with tab1:
     st.subheader("📊 Evaluasi Model Random Forest")
@@ -175,7 +201,10 @@ with tab1:
     st.pyplot(fig_n)
 
     # Classification Report
-    report_rf = classification_report(y_enc, y_pred, labels=unique_labels_rf, target_names=display_labels_rf, output_dict=True, zero_division=0)
+    report_rf = classification_report(
+        y_enc, y_pred, labels=unique_labels_rf, target_names=display_labels_rf,
+        output_dict=True, zero_division=0.0  # type: ignore
+    )
     st.markdown("### Metrik Klasifikasi RF")
     st.dataframe(pd.DataFrame(report_rf).transpose().round(2))
 
@@ -208,14 +237,21 @@ with tab2:
     ).plot(ax=ax_dt_n, values_format='.2f')
     st.pyplot(fig_dt_n)
 
-    report_dt = classification_report(y_enc, y_pred_dt, labels=unique_labels_dt, target_names=display_labels_dt, output_dict=True, zero_division=0)
+    report_dt = classification_report(
+        y_enc, y_pred_dt, labels=unique_labels_dt, target_names=display_labels_dt,
+        output_dict=True, zero_division=0.0  # type: ignore
+    )
     st.markdown("### Metrik Klasifikasi DT")
     st.dataframe(pd.DataFrame(report_dt).transpose().round(2))
 
 with tab3:
     st.subheader("📊 Perbandingan F1-Score DT vs RF")
-    f1_rf = pd.DataFrame(report_rf).transpose()['f1-score']
-    f1_dt = pd.DataFrame(report_dt).transpose()['f1-score']
+    # Gabungkan index dari kedua report agar urutan label sinkron
+    idx_rf = pd.DataFrame(report_rf).transpose().index
+    idx_dt = pd.DataFrame(report_dt).transpose().index
+    all_index = sorted(set(idx_rf) | set(idx_dt))
+    f1_rf = pd.DataFrame(report_rf).transpose().reindex(index=all_index)['f1-score']
+    f1_dt = pd.DataFrame(report_dt).transpose().reindex(index=all_index)['f1-score']
     df_comp = pd.DataFrame({'Random Forest': f1_rf, 'Decision Tree': f1_dt})
     st.dataframe(df_comp)
 
@@ -230,25 +266,25 @@ with tab4:
     # Download Evaluasi RF
     if st.button("⬇️ Download Evaluasi Random Forest ke Excel"):
         towrite = io.BytesIO()
-        with pd.ExcelWriter(towrite, engine='xlsxwriter') as writer:
+        with pd.ExcelWriter(towrite, engine='xlsxwriter') as writer: # type: ignore
             pd.DataFrame(report_rf).transpose().round(2).to_excel(writer, sheet_name="Evaluasi_RF")
-            pd.DataFrame(cm, index=display_labels_rf, columns=display_labels_rf).to_excel(writer, sheet_name="Confusion_Matrix_RF")
+            pd.DataFrame(cm, index=pd.Index(display_labels_rf), columns=pd.Index(display_labels_rf)).to_excel(writer, sheet_name="Confusion_Matrix_RF")
         towrite.seek(0)
         st.download_button("📄 Unduh Evaluasi RF", data=towrite, file_name="evaluasi_rf.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
     # Download Evaluasi DT
     if st.button("⬇️ Download Evaluasi Decision Tree ke Excel"):
         towrite = io.BytesIO()
-        with pd.ExcelWriter(towrite, engine='xlsxwriter') as writer:
+        with pd.ExcelWriter(towrite, engine='xlsxwriter') as writer: # type: ignore
             pd.DataFrame(report_dt).transpose().round(2).to_excel(writer, sheet_name="Evaluasi_DT")
-            pd.DataFrame(confusion_matrix(y_enc, y_pred_dt, labels=unique_labels_dt), index=display_labels_dt, columns=display_labels_dt).to_excel(writer, sheet_name="Confusion_Matrix_DT")
+            pd.DataFrame(confusion_matrix(y_enc, y_pred_dt, labels=unique_labels_dt), index=pd.Index(display_labels_dt), columns=pd.Index(display_labels_dt)).to_excel(writer, sheet_name="Confusion_Matrix_DT")
         towrite.seek(0)
         st.download_button("📄 Unduh Evaluasi DT", data=towrite, file_name="evaluasi_dt.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
     # Download Perbandingan F1
     if st.button("⬇️ Download Perbandingan ke Excel"):
         towrite_cmp = io.BytesIO()
-        with pd.ExcelWriter(towrite_cmp, engine='xlsxwriter') as writer:
+        with pd.ExcelWriter(towrite_cmp, engine='xlsxwriter') as writer: # type: ignore
             df_comp.to_excel(writer, sheet_name="Perbandingan_F1")
         towrite_cmp.seek(0)
         st.download_button("📄 Unduh Perbandingan F1", data=towrite_cmp, file_name="perbandingan_f1.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
@@ -273,10 +309,10 @@ with tab4:
             pdf = FPDF()
             pdf.add_page()
             pdf.set_font("Arial", size=12)
-            pdf.cell(0, 10, txt="Evaluasi Model Random Forest", ln=True, align='C')
+            pdf.cell(0, 10, "Evaluasi Model Random Forest", ln=True, align='C')
             pdf.image(cm_path, x=10, y=25, w=180)
             pdf.ln(95)
-            pdf.cell(0, 10, txt="Perbandingan F1-Score DT vs RF", ln=True, align='C')
+            pdf.cell(0, 10, "Perbandingan F1-Score DT vs RF", ln=True, align='C')
             pdf.image(comp_path, x=10, y=130, w=180)
 
             pdf_path = os.path.join(tmpdir, "evaluasi.pdf")
@@ -284,5 +320,47 @@ with tab4:
 
             with open(pdf_path, "rb") as f:
                 st.download_button("📄 Unduh Evaluasi PDF", data=f, file_name="evaluasi.pdf", mime="application/pdf")
-                
-st.write("Distribusi label (full):", df['label_efektivitas'].value_counts())
+
+with tab5:
+    st.subheader("📊 Evaluasi Model Balanced Random Forest")
+    y_pred_bal_rf = model_bal_rf.predict(X_eval)
+    unique_labels_bal_rf = sorted(list(set(y_enc) | set(y_pred_bal_rf)))
+    display_labels_bal_rf = [labels[i] for i in unique_labels_bal_rf]
+
+    # Confusion Matrix
+    cm_bal = confusion_matrix(y_enc, y_pred_bal_rf, labels=unique_labels_bal_rf)
+    fig_cm_bal, ax_cm_bal = plt.subplots()
+    ConfusionMatrixDisplay(confusion_matrix=cm_bal, display_labels=display_labels_bal_rf).plot(ax=ax_cm_bal)
+    st.pyplot(fig_cm_bal)
+
+    # Normalized Confusion Matrix
+    st.markdown("#### Confusion Matrix (Normalized)")
+    cm_norm_bal = confusion_matrix(y_enc, y_pred_bal_rf, labels=unique_labels_bal_rf, normalize='true')
+    fig_n_bal, ax_n_bal = plt.subplots()
+    ConfusionMatrixDisplay(confusion_matrix=cm_norm_bal, display_labels=display_labels_bal_rf).plot(ax=ax_n_bal, values_format='.2f')
+    st.pyplot(fig_n_bal)
+
+    # Classification Report
+    report_bal_rf = classification_report(
+        y_enc, y_pred_bal_rf, labels=unique_labels_bal_rf, target_names=display_labels_bal_rf,
+        output_dict=True, zero_division=0.0  # type: ignore
+    )
+    st.markdown("### Metrik Klasifikasi Balanced RF")
+    st.dataframe(pd.DataFrame(report_bal_rf).transpose().round(2))
+
+    # Feature Importance
+    st.markdown("### 🔍 Feature Importance Balanced RF")
+    feat_imp_bal = pd.DataFrame({
+        "Fitur": dummy_features,
+        "Importance": model_bal_rf.feature_importances_
+    }).sort_values("Importance", ascending=False)
+    st.dataframe(feat_imp_bal)
+
+    # Distribusi prediksi
+    st.write("Distribusi prediksi Balanced RF:", pd.Series(y_pred_bal_rf).value_counts())
+
+st.write("Prediksi RF:", list(np.unique(y_pred, return_counts=True)[0]), list(np.unique(y_pred, return_counts=True)[1]))
+st.write("Prediksi DT:", list(np.unique(y_pred_dt, return_counts=True)[0]), list(np.unique(y_pred_dt, return_counts=True)[1]))
+st.write("Distribusi label (full):", pd.Series(df['label_efektivitas']).value_counts())
+st.write("Distribusi prediksi RF:", pd.Series(y_pred).value_counts())
+st.write("Distribusi prediksi DT:", pd.Series(y_pred_dt).value_counts())

@@ -3,7 +3,8 @@ import joblib
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
-from imblearn.over_sampling import SMOTE
+from imblearn.over_sampling import SMOTE, RandomOverSampler
+from imblearn.ensemble import BalancedRandomForestClassifier
 from sklearn.preprocessing import LabelEncoder
 import numpy as np
 
@@ -34,9 +35,10 @@ label_le = LabelEncoder()
 y = label_le.fit_transform(df['label_efektivitas'])
 
 # Tampilkan distribusi label sebelum split
+labels_list = list(label_le.classes_) if hasattr(label_le, 'classes_') and label_le.classes_ is not None else []
 print("Distribusi label sebelum split:")
-for i, label in enumerate(label_le.classes_):
-    print(f"{label}: {(y == i).sum()}")
+for i, label in enumerate(labels_list):
+    print(f"{label}: {np.sum(y == i)}")
 
 # Split data
 X_train, X_test, y_train, y_test = train_test_split(
@@ -48,20 +50,44 @@ X_train, X_test, y_train, y_test = train_test_split(
 
 # Tampilkan distribusi label pada data train sebelum oversampling
 print("\nDistribusi label pada data train sebelum oversampling:")
-for i, label in enumerate(label_le.classes_):
-    print(f"{label}: {(y_train == i).sum()}")
+for i, label in enumerate(labels_list):
+    print(f"{label}: {np.sum(y_train == i)}")
 
 # Oversample data train
 smote = SMOTE(random_state=42)
-X_train_bal, y_train_bal = smote.fit_resample(X_train, y_train)
+X_train_bal, y_train_bal = smote.fit_resample(X_train, y_train)  # type: ignore
 
-# Tampilkan distribusi label pada data train setelah oversampling
+# Tampilkan distribusi label pada data train setelah SMOTE:
 print("\nDistribusi label pada data train setelah SMOTE:")
-for i, label in enumerate(label_le.classes_):
-    print(f"{label}: {(y_train_bal == i).sum()}")
+for i, label in enumerate(labels_list):
+    print(f"{label}: {np.sum(y_train_bal == i)}")
+
+# Oversample lagi dengan RandomOverSampler
+ros = RandomOverSampler(random_state=42)
+X_train_ros, y_train_ros = ros.fit_resample(X_train_bal, y_train_bal)  # type: ignore
+if not isinstance(y_train_ros, np.ndarray):
+    y_train_ros = np.array(y_train_ros)
+print("\nDistribusi label pada data train setelah RandomOverSampler:")
+for i, label in enumerate(labels_list):
+    print(f"{label}: {np.sum(y_train_ros == i)}")
+
+# Debug: print shape dan cek NaN
+print("X_train_bal shape:", X_train_bal.shape)
+print("X_train_ros shape:", X_train_ros.shape)
+print("y_train_bal shape:", y_train_bal.shape)
+print("y_train_ros shape:", y_train_ros.shape)
+print("NaN in X_train_bal:", np.isnan(X_train_bal).any() if hasattr(X_train_bal, 'any') else False)
+print("NaN in X_train_ros:", np.isnan(X_train_ros).any() if hasattr(X_train_ros, 'any') else False)
+print("NaN in y_train_bal:", np.isnan(y_train_bal).any() if hasattr(y_train_bal, 'any') else False)
+print("NaN in y_train_ros:", np.isnan(y_train_ros).any() if hasattr(y_train_ros, 'any') else False)
+
+# --- Train Balanced Random Forest (pakai data hasil RandomOverSampler)
+bal_rf_model = BalancedRandomForestClassifier(n_estimators=100, random_state=42)
+bal_rf_model.fit(X_train_ros, y_train_ros)
+joblib.dump(bal_rf_model, "model/balanced_random_forest_model.pkl")
 
 # --- Train Decision Tree (pakai data hasil oversampling)
-dt_model = DecisionTreeClassifier(random_state=42)
+dt_model = DecisionTreeClassifier(random_state=42, class_weight='balanced')
 dt_model.fit(X_train_bal, y_train_bal)
 joblib.dump(dt_model, "model/decision_tree_model.pkl")
 
