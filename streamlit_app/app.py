@@ -1,43 +1,119 @@
+#!/usr/bin/env python3
+"""
+Aplikasi Streamlit untuk Klasifikasi Efektivitas Intervensi Stunting
+Skripsi: Muhammad Rizqi (123190083) - Informatika S1, UPN "Veteran" Yogyakarta
+
+Judul: Klasifikasi Efektivitas Respon Intervensi Stunting di Desa 
+       Menggunakan Algoritma Decision Tree dan Random Forest
+       (Studi Kasus: Data Kementerian Desa PDTT 2023)
+"""
+
 import sys
 import os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src')))
+from pathlib import Path
+
+# Setup path
+current_dir = Path(__file__).parent
+parent_dir = current_dir.parent
+src_dir = parent_dir / "src"
+sys.path.insert(0, str(src_dir))
 
 import streamlit as st
 import pandas as pd
 import joblib
 import matplotlib.pyplot as plt
+import seaborn as sns
 import shap
-import io
-from datetime import datetime
 import numpy as np
+from datetime import datetime
+import io
 
-from encoder_utils import fit_label_encoders, normalize_kategorikal
-from shap_utils import generate_shap_plot
-from form_utils import encode_manual_input
+# Import modules
+try:
+    from encoder_utils import encode_features, normalize_kategorikal
+    from shap_utils import generate_shap_plot
+except ImportError as e:
+    st.error(f"❌ Import error: {e}")
+    st.error("Pastikan semua file di folder 'src' tersedia")
+    st.stop()
+
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, classification_report
 from sklearn.preprocessing import LabelEncoder
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.ensemble import RandomForestClassifier
-from fpdf import FPDF
-import tempfile
 
-# --- Config
-st.set_page_config(page_title="Klasifikasi Efektivitas Intervensi", layout="wide")
-st.title("Klasifikasi Efektivitas Intervensi Stunting di Desa")
+# ==========================================
+# KONFIGURASI APLIKASI
+# ==========================================
 
-# --- Load model & data
-model_rf = joblib.load("model/random_forest_model.pkl")
-model_dt = joblib.load("model/decision_tree_model.pkl")
-model_bal_rf = joblib.load("model/balanced_random_forest_model.pkl")
-df = pd.read_csv("data/stunting_2023_labeled.csv")
+st.set_page_config(
+    page_title="Klasifikasi Efektivitas Intervensi Stunting",
+    page_icon="🎯",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-# --- Fit LabelEncoder untuk target
-y_label = df['label_efektivitas']
-le_label = LabelEncoder().fit(y_label)
-labels = list(le_label.classes_) if hasattr(le_label, 'classes_') and le_label.classes_ is not None else []
+# ==========================================
+# HELPER FUNCTIONS
+# ==========================================
 
-# --- Fitur kategori indikator
-dummy_features = [
+@st.cache_data
+def load_data():
+    """Load dataset dengan caching"""
+    data_path = parent_dir / "data" / "stunting_2023_labeled.csv"
+    if not data_path.exists():
+        st.error(f"❌ File data tidak ditemukan: {data_path}")
+        st.error("Jalankan `python main.py` terlebih dahulu")
+        st.stop()
+    return pd.read_csv(data_path)
+
+@st.cache_resource
+def load_models():
+    """Load semua model dan encoder dengan caching"""
+    model_dir = parent_dir / "model"
+    
+    required_files = {
+        "decision_tree_model.pkl": "Decision Tree Model",
+        "random_forest_model.pkl": "Random Forest Model", 
+        "feature_label_encoders.pkl": "Feature Encoders",
+        "target_label_encoder.pkl": "Target Encoder"
+    }
+    
+    # Check file existence
+    for filename, description in required_files.items():
+        filepath = model_dir / filename
+        if not filepath.exists():
+            st.error(f"❌ {description} tidak ditemukan: {filepath}")
+            st.error("Jalankan `python src/model_training.py` terlebih dahulu")
+            st.stop()
+    
+    # Load models and encoders
+    try:
+        models = {
+            'Decision Tree': joblib.load(model_dir / "decision_tree_model.pkl"),
+            'Random Forest': joblib.load(model_dir / "random_forest_model.pkl")
+        }
+        
+        le_dict = joblib.load(model_dir / "feature_label_encoders.pkl")
+        target_le = joblib.load(model_dir / "target_label_encoder.pkl")
+        
+        return models, le_dict, target_le
+        
+    except Exception as e:
+        st.error(f"❌ Error loading models: {e}")
+        st.stop()
+
+def encode_dataset_for_prediction(df, le_dict, features):
+    """Encode dataset untuk prediksi"""
+    try:
+        return encode_features(df, le_dict, features)
+    except Exception as e:
+        st.error(f"❌ Error encoding dataset: {e}")
+        return None
+
+# ==========================================
+# KONSTANTA
+# ==========================================
+
+FEATURE_COLUMNS = [
     'Desa_melakukan_monitoring/evaluasi_atas_pelaksanaan_konvergensi_stunting_min._2_kali_dlm_1tahun',
     'Aktivitas_rutin_Penyelenggaraan_posyandu_',
     'Terdapat_Pembentukan_RDS/TPPS',
@@ -45,322 +121,475 @@ dummy_features = [
     'Terdapat_Pengembangan_Program_Ketahanan_Pangan'
 ]
 
-# Fungsi untuk encoding fitur
-def encode_features(df, le_dict, features):
-    df_enc = df[features].fillna("Tidak Ada").apply(lambda col: col.str.strip().str.lower())
-    for col in features:
-        # Mapping nilai yang tidak ada di encoder ke kelas pertama
-        df_enc[col] = df_enc[col].where(df_enc[col].isin(le_dict[col].classes_), le_dict[col].classes_[0])
-        df_enc[col] = le_dict[col].transform(df_enc[col])
-    return df_enc
-
-# --- Encode seluruh dataset untuk prediksi otomatis
-X_raw, le_dict = fit_label_encoders(df[dummy_features].copy(), dummy_features)
-pred_enc = model_rf.predict(X_raw)
-df['Prediksi_Model'] = le_label.inverse_transform(pred_enc)
-
-# --- Sidebar Filter
-st.sidebar.header("Filter Data")
-if 'NAMA_KABUPATEN' in df.columns:
-    choices = df['NAMA_KABUPATEN'].dropna().unique().tolist()
-    sel_kab = st.sidebar.multiselect("Pilih Kabupaten", options=choices)
-    if sel_kab:
-        df = df[df['NAMA_KABUPATEN'].isin(sel_kab)]
-
-# --- Tampilkan Data & Prediksi
-st.subheader("Data dan Prediksi")
-display_cols = ['NAMA_DESA'] + dummy_features + ['Prediksi_Model']
-df_display = df[display_cols]
-if not isinstance(df_display, pd.DataFrame):
-    df_display = pd.DataFrame(df_display, columns=pd.Index(display_cols))
-st.dataframe(df_display.reset_index(drop=True))
-
-# --- SHAP Global (Sidebar)
-with st.sidebar.expander("Interpretasi SHAP (Global)", expanded=False):
-    X_disp = df[dummy_features]
-    if not isinstance(X_disp, pd.DataFrame):
-        X_disp = pd.DataFrame(X_disp, columns=pd.Index(dummy_features))
-    X_disp = X_disp.fillna("Tidak Ada")
-    for col in dummy_features:
-        if not isinstance(X_disp[col], pd.Series):
-            X_disp[col] = pd.Series(X_disp[col])
-        X_disp[col] = X_disp[col].where(X_disp[col].isin(le_dict[col].classes_), le_dict[col].classes_[0])
-    X_disp_enc = pd.DataFrame({col: le_dict[col].transform(X_disp[col]) for col in dummy_features})
-    explainer = shap.TreeExplainer(model_rf)
-    shap_values = explainer.shap_values(X_disp_enc)
-    st.markdown("#### SHAP Summary Plot (Global)")
-    fig_shap, ax_shap = plt.subplots()
-    shap.summary_plot(shap_values, X_disp_enc, feature_names=dummy_features, show=False)
-    st.pyplot(fig_shap)
-
-# --- SHAP Instance (Main Panel)
-st.sidebar.markdown("---")
-selected_class = st.sidebar.radio("Interpretasi SHAP untuk kelas:", labels)
-selected_idx = labels.index(selected_class)
-
-st.subheader("Interpretasi SHAP")
-idx = st.number_input("Pilih index desa (0-n)", min_value=0, max_value=len(df)-1, value=0)
-st.markdown(f"**Nama Desa:** {df.iloc[idx]['NAMA_DESA']}")
-
-fig_shap_instance, _, _ = generate_shap_plot(model_rf, X_disp_enc, idx, selected_idx, dummy_features)
-st.pyplot(fig_shap_instance)
-
-# --- Manual Input Form (dropdown seimbang & label singkat)
-st.subheader("Prediksi Manual")
-col_count = len(dummy_features)
-cols = st.columns(col_count, gap="medium")
-manual_input = {}
-
-label_map = {
-    dummy_features[0]: "Monitoring/Evaluasi",
-    dummy_features[1]: "Posyandu",
-    dummy_features[2]: "RDS/TPPS",
-    dummy_features[3]: "Peningkatan Kapasitas",
-    dummy_features[4]: "Ketahanan Pangan"
+FEATURE_LABELS = {
+    FEATURE_COLUMNS[0]: "Monitoring/Evaluasi",
+    FEATURE_COLUMNS[1]: "Posyandu",
+    FEATURE_COLUMNS[2]: "RDS/TPPS", 
+    FEATURE_COLUMNS[3]: "Peningkatan Kapasitas",
+    FEATURE_COLUMNS[4]: "Ketahanan Pangan"
 }
 
-# Opsi yang sudah dinormalisasi
-opsi_valid = ["Ada", "Tidak Ada", "Rutin Tiap Bulan"]
+# ==========================================
+# LOAD DATA DAN MODEL
+# ==========================================
 
-with st.form("manual_form"):
-    for i, col in enumerate(dummy_features):
-        manual_input[col] = cols[i].selectbox(label_map.get(col, col), opsi_valid, key=f"manual_{col}")
-    submit = st.form_submit_button("Prediksi Efektivitas")
+# Load data dan model
+df = load_data()
+models, le_dict, target_le = load_models()
+labels = target_le.classes_.tolist()
 
-if submit:
-    df_enc = pd.DataFrame([manual_input])
-    # Normalisasi manual input agar sama dengan training
-    df_enc = df_enc.apply(lambda col: col.str.strip().str.lower())
-    # Pastikan semua nilai ada di encoder, jika tidak mapping ke kelas pertama
-    for col in dummy_features:
-        df_enc[col] = df_enc[col].astype(str)
-        if not isinstance(df_enc[col], pd.Series):
-            df_enc[col] = pd.Series(df_enc[col])
+# Validasi kolom yang dibutuhkan
+missing_features = [f for f in FEATURE_COLUMNS if f not in df.columns]
+if missing_features:
+    st.error(f"❌ Kolom tidak ditemukan: {missing_features}")
+    st.stop()
+
+# Encode dataset untuk prediksi
+X_encoded = encode_dataset_for_prediction(df, le_dict, FEATURE_COLUMNS)
+if X_encoded is not None:
+    rf_predictions = models['Random Forest'].predict(X_encoded)
+    df['Prediksi_RF'] = target_le.inverse_transform(rf_predictions)
+    
+    dt_predictions = models['Decision Tree'].predict(X_encoded)  
+    df['Prediksi_DT'] = target_le.inverse_transform(dt_predictions)
+
+# ==========================================
+# HEADER APLIKASI
+# ==========================================
+
+st.title("🎯 Klasifikasi Efektivitas Intervensi Stunting di Desa")
+st.markdown("---")
+
+# Info Skripsi
+with st.expander("📚 Informasi Skripsi", expanded=False):
+    st.markdown("""
+    **Judul:** Klasifikasi Efektivitas Respon Intervensi Stunting di Desa Menggunakan Algoritma Decision Tree dan Random Forest (Studi Kasus: Data Kementerian Desa PDTT 2023)
+    
+    **Mahasiswa:** Muhammad Rizqi (123190083)  
+    **Program Studi:** Informatika S1  
+    **Universitas:** UPN "Veteran" Yogyakarta
+    
+    **Dataset:** {len(df)} desa dari data Kementerian Desa PDTT 2023  
+    **Fitur:** {len(FEATURE_COLUMNS)} indikator efektivitas intervensi stunting
+    """)
+
+# ==========================================
+# SIDEBAR FILTERS
+# ==========================================
+
+st.sidebar.header("🔍 Filter Data")
+
+# Filter berdasarkan kabupaten
+df_filtered = df.copy()
+if 'NAMA_KABUPATEN' in df.columns:
+    kabupaten_list = ['Semua'] + sorted(df['NAMA_KABUPATEN'].dropna().unique().tolist())
+    selected_kabupaten = st.sidebar.selectbox("Pilih Kabupaten:", kabupaten_list)
+    
+    if selected_kabupaten != 'Semua':
+        df_filtered = df_filtered[df_filtered['NAMA_KABUPATEN'] == selected_kabupaten]
+
+# Filter berdasarkan prediksi
+prediksi_list = ['Semua'] + sorted(df_filtered['Prediksi_RF'].unique().tolist())
+selected_prediksi = st.sidebar.selectbox("Filter Prediksi:", prediksi_list)
+
+if selected_prediksi != 'Semua':
+    df_filtered = df_filtered[df_filtered['Prediksi_RF'] == selected_prediksi]
+
+# Info data terfilter
+st.sidebar.markdown("---")
+st.sidebar.metric("Total Desa", len(df))
+st.sidebar.metric("Desa Terfilter", len(df_filtered))
+
+if len(df_filtered) > 0:
+    efektif_count = len(df_filtered[df_filtered['Prediksi_RF'] == 'Efektif'])
+    st.sidebar.metric("Prediksi Efektif", efektif_count)
+
+# ==========================================
+# RINGKASAN DATASET
+# ==========================================
+
+col1, col2, col3, col4 = st.columns(4)
+
+with col1:
+    st.metric("Total Desa", len(df))
+with col2:
+    st.metric("Jumlah Fitur", len(FEATURE_COLUMNS))
+with col3:
+    if 'label_efektivitas' in df.columns:
+        efektif_asli = len(df[df['label_efektivitas'] == 'Efektif'])
+        st.metric("Label Efektif (Asli)", efektif_asli)
+    else:
+        st.metric("Label Efektif (Asli)", "N/A")
+with col4:
+    efektif_pred = len(df[df['Prediksi_RF'] == 'Efektif'])
+    st.metric("Prediksi Efektif (RF)", efektif_pred)
+
+# ==========================================
+# DATA VISUALIZATION
+# ==========================================
+
+st.markdown("---")
+st.subheader("📊 Visualisasi Data")
+
+# Tabs untuk berbagai visualisasi
+viz_tab1, viz_tab2, viz_tab3 = st.tabs(["📈 Distribusi", "🗺️ Per Kabupaten", "📋 Tabel Data"])
+
+with viz_tab1:
+    col_viz1, col_viz2 = st.columns(2)
+    
+    with col_viz1:
+        # Distribusi label asli vs prediksi
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+        
+        if 'label_efektivitas' in df.columns:
+            df['label_efektivitas'].value_counts().plot(kind='pie', ax=ax1, autopct='%1.1f%%')
+            ax1.set_title('Distribusi Label Asli')
+        
+        df['Prediksi_RF'].value_counts().plot(kind='pie', ax=ax2, autopct='%1.1f%%')
+        ax2.set_title('Distribusi Prediksi Random Forest')
+        
+        plt.tight_layout()
+        st.pyplot(fig)
+    
+    with col_viz2:
+        # Distribusi skor
+        if 'skor' in df.columns:
+            fig, ax = plt.subplots(figsize=(8, 5))
+            df['skor'].value_counts().sort_index().plot(kind='bar', ax=ax)
+            ax.set_title('Distribusi Skor Efektivitas')
+            ax.set_xlabel('Skor')
+            ax.set_ylabel('Jumlah Desa')
+            plt.xticks(rotation=0)
+            st.pyplot(fig)
+
+with viz_tab2:
+    # Analisis per kabupaten
+    if 'NAMA_KABUPATEN' in df.columns:
+        kabupaten_summary = df.groupby('NAMA_KABUPATEN').agg({
+            'Prediksi_RF': lambda x: (x == 'Efektif').sum(),
+            'NAMA_DESA': 'count'
+        }).rename(columns={'Prediksi_RF': 'Efektif', 'NAMA_DESA': 'Total'})
+        
+        kabupaten_summary['Persentase_Efektif'] = (kabupaten_summary['Efektif'] / kabupaten_summary['Total'] * 100).round(1)
+        kabupaten_summary = kabupaten_summary.sort_values('Persentase_Efektif', ascending=False)
+        
+        # Bar chart
+        fig, ax = plt.subplots(figsize=(12, 8))
+        kabupaten_summary['Persentase_Efektif'].plot(kind='barh', ax=ax)
+        ax.set_title('Persentase Prediksi Efektif per Kabupaten')
+        ax.set_xlabel('Persentase (%)')
+        plt.tight_layout()
+        st.pyplot(fig)
+        
+        # Tabel summary
+        st.dataframe(kabupaten_summary, use_container_width=True)
+
+with viz_tab3:
+    # Tabel data dengan prediksi
+    display_columns = []
+    if 'NAMA_DESA' in df_filtered.columns:
+        display_columns.append('NAMA_DESA')
+    if 'NAMA_KABUPATEN' in df_filtered.columns:
+        display_columns.append('NAMA_KABUPATEN')
+    
+    display_columns.extend(FEATURE_COLUMNS)
+    
+    if 'label_efektivitas' in df_filtered.columns:
+        display_columns.extend(['label_efektivitas', 'Prediksi_RF', 'Prediksi_DT'])
+    else:
+        display_columns.extend(['Prediksi_RF', 'Prediksi_DT'])
+    
+    if 'skor' in df_filtered.columns:
+        display_columns.append('skor')
+    
+    # Filter kolom yang benar-benar ada
+    available_columns = [col for col in display_columns if col in df_filtered.columns]
+    
+    st.dataframe(
+        df_filtered[available_columns].reset_index(drop=True),
+        use_container_width=True,
+        height=400
+    )
+    
+    # Download button
+    csv_data = df_filtered[available_columns].to_csv(index=False)
+    st.download_button(
+        label="📥 Download Data Terfilter (CSV)",
+        data=csv_data,
+        file_name=f"data_stunting_filtered_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+        mime="text/csv"
+    )
+
+# ==========================================
+# PREDIKSI MANUAL
+# ==========================================
+
+st.markdown("---")
+st.subheader("🔮 Prediksi Manual")
+
+with st.form("manual_prediction_form"):
+    st.markdown("**Pilih kondisi untuk setiap indikator:**")
+    
+    cols = st.columns(len(FEATURE_COLUMNS))
+    manual_input = {}
+    
+    for i, feature in enumerate(FEATURE_COLUMNS):
+        options = ["Tidak Ada", "Ada", "Rutin Tiap Bulan"]
+        manual_input[feature] = cols[i].selectbox(
+            FEATURE_LABELS[feature],
+            options,
+            key=f"manual_{i}"
+        )
+    
+    col_submit1, col_submit2 = st.columns([1, 4])
+    with col_submit1:
+        submit_manual = st.form_submit_button("🎯 Prediksi", use_container_width=True)
+    
+    if submit_manual:
         try:
-            df_enc[col] = df_enc[col].where(df_enc[col].isin(le_dict[col].classes_), le_dict[col].classes_[0])  # type: ignore
-        except Exception:
-            df_enc[col] = pd.Series(list(df_enc[col]))
-            df_enc[col] = df_enc[col].apply(lambda x: x if x in le_dict[col].classes_ else le_dict[col].classes_[0])  # type: ignore
-    df_enc = pd.DataFrame({col: le_dict[col].transform(df_enc[col]) for col in dummy_features})
+            # Encode input manual
+            df_manual = pd.DataFrame([manual_input])
+            df_manual_encoded = encode_features(df_manual, le_dict, FEATURE_COLUMNS)
+            
+            # Prediksi dengan kedua model
+            pred_rf = models['Random Forest'].predict(df_manual_encoded)[0]
+            pred_dt = models['Decision Tree'].predict(df_manual_encoded)[0]
+            
+            pred_rf_proba = models['Random Forest'].predict_proba(df_manual_encoded)[0]
+            pred_dt_proba = models['Decision Tree'].predict_proba(df_manual_encoded)[0]
+            
+            label_rf = target_le.inverse_transform([pred_rf])[0]
+            label_dt = target_le.inverse_transform([pred_dt])[0]
+            
+            # Tampilkan hasil
+            col_result1, col_result2 = st.columns(2)
+            
+            with col_result1:
+                st.success(f"🌲 **Random Forest:** {label_rf}")
+                
+                # Probabilitas RF
+                prob_df_rf = pd.DataFrame({
+                    'Kelas': labels,
+                    'Probabilitas': pred_rf_proba
+                }).sort_values('Probabilitas', ascending=False)
+                st.dataframe(prob_df_rf, use_container_width=True, hide_index=True)
+            
+            with col_result2:
+                st.success(f"🌳 **Decision Tree:** {label_dt}")
+                
+                # Probabilitas DT
+                prob_df_dt = pd.DataFrame({
+                    'Kelas': labels,
+                    'Probabilitas': pred_dt_proba
+                }).sort_values('Probabilitas', ascending=False)
+                st.dataframe(prob_df_dt, use_container_width=True, hide_index=True)
+            
+            # SHAP explanation untuk Random Forest
+            st.markdown("---")
+            st.markdown("**🧠 Interpretasi SHAP (Random Forest):**")
+            
+            try:
+                fig_shap, _, _ = generate_shap_plot(
+                    models['Random Forest'], 
+                    df_manual_encoded, 
+                    0, 
+                    pred_rf, 
+                    [FEATURE_LABELS[f] for f in FEATURE_COLUMNS]
+                )
+                st.pyplot(fig_shap)
+                plt.close()
+            except Exception as e:
+                st.error(f"Error generating SHAP plot: {e}")
+                
+        except Exception as e:
+            st.error(f"❌ Error dalam prediksi: {e}")
 
-    st.markdown("🔍 **Hasil encoding input manual:**")
-    st.dataframe(df_enc)
+# ==========================================
+# EVALUASI MODEL
+# ==========================================
 
-    st.markdown("#### Mapping LabelEncoder fitur:")
-    for col in dummy_features:
-        le = le_dict[col]
-        st.text(f"{col}: {dict(zip(le.classes_, le.transform(le.classes_)))}")
+st.markdown("---")
+st.subheader("📊 Evaluasi Model")
 
-    pred_m = model_rf.predict(df_enc)[0]
-    label_m = le_label.inverse_transform([pred_m])[0] if pred_m is not None and hasattr(le_label, 'inverse_transform') else "-"  # type: ignore
-    st.success(f"Prediksi: **{label_m}**")
+if 'label_efektivitas' in df.columns:
+    # Persiapan data evaluasi
+    y_true = target_le.transform(df['label_efektivitas'])
+    y_pred_rf = target_le.transform(df['Prediksi_RF'])
+    y_pred_dt = target_le.transform(df['Prediksi_DT'])
+    
+    # Tabs untuk evaluasi
+    eval_tab1, eval_tab2, eval_tab3 = st.tabs(["🌲 Random Forest", "🌳 Decision Tree", "⚖️ Perbandingan"])
+    
+    with eval_tab1:
+        st.markdown("### Random Forest")
+        
+        col_metric1, col_metric2 = st.columns(2)
+        
+        with col_metric1:
+            # Akurasi
+            accuracy_rf = (y_pred_rf == y_true).mean()
+            st.metric("Akurasi", f"{accuracy_rf:.3f}")
+            
+            # Confusion Matrix
+            cm_rf = confusion_matrix(y_true, y_pred_rf)
+            fig_cm_rf, ax_cm_rf = plt.subplots(figsize=(8, 6))
+            ConfusionMatrixDisplay(confusion_matrix=cm_rf, display_labels=labels).plot(ax=ax_cm_rf)
+            ax_cm_rf.set_title("Confusion Matrix - Random Forest")
+            st.pyplot(fig_cm_rf)
+            plt.close()
+        
+        with col_metric2:
+            # Classification Report
+            report_rf = classification_report(
+                y_true, y_pred_rf,
+                target_names=labels,
+                output_dict=True,
+                zero_division=0
+            )
+            
+            st.markdown("**Classification Report:**")
+            report_df_rf = pd.DataFrame(report_rf).transpose().round(3)
+            st.dataframe(report_df_rf, use_container_width=True)
+            
+            # Feature Importance
+            st.markdown("**Feature Importance:**")
+            feat_imp_rf = pd.DataFrame({
+                'Feature': [FEATURE_LABELS[f] for f in FEATURE_COLUMNS],
+                'Importance': models['Random Forest'].feature_importances_
+            }).sort_values('Importance', ascending=False)
+            
+            fig_imp_rf, ax_imp_rf = plt.subplots(figsize=(8, 5))
+            feat_imp_rf.plot(x='Feature', y='Importance', kind='barh', ax=ax_imp_rf)
+            ax_imp_rf.set_title('Feature Importance - Random Forest')
+            plt.tight_layout()
+            st.pyplot(fig_imp_rf)
+            plt.close()
+    
+    with eval_tab2:
+        st.markdown("### Decision Tree")
+        
+        col_metric3, col_metric4 = st.columns(2)
+        
+        with col_metric3:
+            # Akurasi
+            accuracy_dt = (y_pred_dt == y_true).mean()
+            st.metric("Akurasi", f"{accuracy_dt:.3f}")
+            
+            # Confusion Matrix
+            cm_dt = confusion_matrix(y_true, y_pred_dt)
+            fig_cm_dt, ax_cm_dt = plt.subplots(figsize=(8, 6))
+            ConfusionMatrixDisplay(confusion_matrix=cm_dt, display_labels=labels).plot(ax=ax_cm_dt)
+            ax_cm_dt.set_title("Confusion Matrix - Decision Tree")
+            st.pyplot(fig_cm_dt)
+            plt.close()
+        
+        with col_metric4:
+            # Classification Report
+            report_dt = classification_report(
+                y_true, y_pred_dt,
+                target_names=labels,
+                output_dict=True,
+                zero_division=0
+            )
+            
+            st.markdown("**Classification Report:**")
+            report_df_dt = pd.DataFrame(report_dt).transpose().round(3)
+            st.dataframe(report_df_dt, use_container_width=True)
+            
+            # Feature Importance
+            st.markdown("**Feature Importance:**")
+            feat_imp_dt = pd.DataFrame({
+                'Feature': [FEATURE_LABELS[f] for f in FEATURE_COLUMNS],
+                'Importance': models['Decision Tree'].feature_importances_
+            }).sort_values('Importance', ascending=False)
+            
+            fig_imp_dt, ax_imp_dt = plt.subplots(figsize=(8, 5))
+            feat_imp_dt.plot(x='Feature', y='Importance', kind='barh', ax=ax_imp_dt)
+            ax_imp_dt.set_title('Feature Importance - Decision Tree')
+            plt.tight_layout()
+            st.pyplot(fig_imp_dt)
+            plt.close()
+    
+    with eval_tab3:
+        st.markdown("### Perbandingan Model")
+        
+        # Perbandingan akurasi
+        comparison_data = {
+            'Model': ['Random Forest', 'Decision Tree'],
+            'Akurasi': [accuracy_rf, accuracy_dt]
+        }
+        
+        comparison_df = pd.DataFrame(comparison_data)
+        st.dataframe(comparison_df, use_container_width=True, hide_index=True)
+        
+        # Perbandingan F1-Score
+        f1_rf = pd.DataFrame(report_rf).transpose()['f1-score'].drop(['accuracy', 'macro avg', 'weighted avg'])
+        f1_dt = pd.DataFrame(report_dt).transpose()['f1-score'].drop(['accuracy', 'macro avg', 'weighted avg'])
+        
+        f1_comparison = pd.DataFrame({
+            'Random Forest': f1_rf,
+            'Decision Tree': f1_dt
+        })
+        
+        st.markdown("**F1-Score per Kelas:**")
+        st.dataframe(f1_comparison.round(3), use_container_width=True)
+        
+        # Visualisasi perbandingan
+        fig_comp, ax_comp = plt.subplots(figsize=(10, 6))
+        f1_comparison.plot(kind='bar', ax=ax_comp)
+        ax_comp.set_ylabel('F1-Score')
+        ax_comp.set_title('Perbandingan F1-Score: Random Forest vs Decision Tree')
+        ax_comp.legend()
+        plt.xticks(rotation=45)
+        plt.tight_layout()
+        st.pyplot(fig_comp)
+        plt.close()
+        
+        # Download evaluasi
+        st.markdown("---")
+        col_dl1, col_dl2 = st.columns(2)
+        
+        with col_dl1:
+            # Download Excel
+            if st.button("📊 Download Evaluasi Excel"):
+                towrite = io.BytesIO()
+                with pd.ExcelWriter(towrite, engine='xlsxwriter') as writer:
+                    report_df_rf.to_excel(writer, sheet_name="Random_Forest")
+                    report_df_dt.to_excel(writer, sheet_name="Decision_Tree") 
+                    f1_comparison.to_excel(writer, sheet_name="Perbandingan_F1")
+                    comparison_df.to_excel(writer, sheet_name="Akurasi", index=False)
+                
+                towrite.seek(0)
+                st.download_button(
+                    label="📥 Download Excel",
+                    data=towrite.getvalue(),
+                    file_name=f"evaluasi_model_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+        
+        with col_dl2:
+            # Info model terbaik
+            if accuracy_rf > accuracy_dt:
+                st.success("🏆 **Model Terbaik:** Random Forest")
+                st.info(f"Akurasi lebih tinggi: {accuracy_rf:.3f} vs {accuracy_dt:.3f}")
+            elif accuracy_dt > accuracy_rf:
+                st.success("🏆 **Model Terbaik:** Decision Tree")
+                st.info(f"Akurasi lebih tinggi: {accuracy_dt:.3f} vs {accuracy_rf:.3f}")
+            else:
+                st.info("🤝 **Kedua model memiliki akurasi yang sama**")
 
-    expl = shap.TreeExplainer(model_rf).shap_values(df_enc)
-    shap_exp_values = expl[pred_m][0] if expl is not None and pred_m is not None and hasattr(expl, '__getitem__') else []
-    shap_base_values = None
-    explainer = shap.TreeExplainer(model_rf)
-    if pred_m is not None and hasattr(explainer, 'expected_value'):
-        try:
-            shap_base_values = explainer.expected_value[pred_m]  # type: ignore
-        except Exception:
-            shap_base_values = None
-    fig, ax = plt.subplots()
-    shap.plots.waterfall(shap.Explanation(
-        values=shap_exp_values,
-        base_values=shap_base_values,
-        data=df_enc.iloc[0] if len(df_enc) > 0 else None,
-        feature_names=dummy_features
-    ), show=False)
-    st.pyplot(fig)
+else:
+    st.warning("⚠️ Kolom 'label_efektivitas' tidak ditemukan. Evaluasi tidak dapat dilakukan.")
 
-# === Tabs Evaluasi ===
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["📉 Random Forest", "🌳 Decision Tree", "⚖️ Perbandingan", "📤 Unduhan", "⚖️ Balanced RF"])
+# ==========================================
+# FOOTER
+# ==========================================
 
-with tab1:
-    st.subheader("📊 Evaluasi Model Random Forest")
-    X_eval = encode_features(df, le_dict, dummy_features)
-    y_true = df['label_efektivitas']
-    y_enc = le_label.transform(y_true)
-    y_pred = model_rf.predict(X_eval)
-
-    # Ambil label unik setelah filter
-    unique_labels_rf = sorted(list(set(y_enc) | set(y_pred)))
-    display_labels_rf = [labels[i] for i in unique_labels_rf]
-
-    # Confusion Matrix
-    cm = confusion_matrix(y_enc, y_pred, labels=unique_labels_rf)
-    fig_cm, ax_cm = plt.subplots()
-    ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=display_labels_rf).plot(ax=ax_cm)
-    st.pyplot(fig_cm)
-
-    # Normalized Confusion Matrix
-    st.markdown("#### Confusion Matrix (Normalized)")
-    cm_norm = confusion_matrix(y_enc, y_pred, labels=unique_labels_rf, normalize='true')
-    fig_n, ax_n = plt.subplots()
-    ConfusionMatrixDisplay(confusion_matrix=cm_norm, display_labels=display_labels_rf).plot(ax=ax_n, values_format='.2f')
-    st.pyplot(fig_n)
-
-    # Classification Report
-    report_rf = classification_report(
-        y_enc, y_pred, labels=unique_labels_rf, target_names=display_labels_rf,
-        output_dict=True, zero_division=0.0  # type: ignore
-    )
-    st.markdown("### Metrik Klasifikasi RF")
-    st.dataframe(pd.DataFrame(report_rf).transpose().round(2))
-
-    # Feature Importance
-    st.markdown("### 🔍 Feature Importance RF")
-    feat_imp = pd.DataFrame({
-        "Fitur": dummy_features,
-        "Importance": model_rf.feature_importances_
-    }).sort_values("Importance", ascending=False)
-    st.dataframe(feat_imp)
-
-with tab2:
-    st.subheader("📊 Evaluasi Model Decision Tree")
-    y_pred_dt = model_dt.predict(X_eval)
-    unique_labels_dt = sorted(list(set(y_enc) | set(y_pred_dt)))
-    display_labels_dt = [labels[i] for i in unique_labels_dt]
-
-    fig_dt, ax_dt = plt.subplots()
-    ConfusionMatrixDisplay(
-        confusion_matrix=confusion_matrix(y_enc, y_pred_dt, labels=unique_labels_dt),
-        display_labels=display_labels_dt
-    ).plot(ax=ax_dt)
-    st.pyplot(fig_dt)
-
-    st.markdown("#### Confusion Matrix DT (Normalized)")
-    fig_dt_n, ax_dt_n = plt.subplots()
-    ConfusionMatrixDisplay(
-        confusion_matrix=confusion_matrix(y_enc, y_pred_dt, labels=unique_labels_dt, normalize='true'),
-        display_labels=display_labels_dt
-    ).plot(ax=ax_dt_n, values_format='.2f')
-    st.pyplot(fig_dt_n)
-
-    report_dt = classification_report(
-        y_enc, y_pred_dt, labels=unique_labels_dt, target_names=display_labels_dt,
-        output_dict=True, zero_division=0.0  # type: ignore
-    )
-    st.markdown("### Metrik Klasifikasi DT")
-    st.dataframe(pd.DataFrame(report_dt).transpose().round(2))
-
-with tab3:
-    st.subheader("📊 Perbandingan F1-Score DT vs RF")
-    # Gabungkan index dari kedua report agar urutan label sinkron
-    idx_rf = pd.DataFrame(report_rf).transpose().index
-    idx_dt = pd.DataFrame(report_dt).transpose().index
-    all_index = sorted(set(idx_rf) | set(idx_dt))
-    f1_rf = pd.DataFrame(report_rf).transpose().reindex(index=all_index)['f1-score']
-    f1_dt = pd.DataFrame(report_dt).transpose().reindex(index=all_index)['f1-score']
-    df_comp = pd.DataFrame({'Random Forest': f1_rf, 'Decision Tree': f1_dt})
-    st.dataframe(df_comp)
-
-    fig_comp, ax_comp = plt.subplots(figsize=(10,4))
-    df_comp.plot(kind='bar', ax=ax_comp)
-    ax_comp.set_ylabel('F1-Score')
-    ax_comp.set_title('Perbandingan F1-Score per Kelas')
-    st.pyplot(fig_comp)
-
-with tab4:
-    st.subheader("📤 Unduhan Evaluasi & Hasil Prediksi")
-    # Download Evaluasi RF
-    if st.button("⬇️ Download Evaluasi Random Forest ke Excel"):
-        towrite = io.BytesIO()
-        with pd.ExcelWriter(towrite, engine='xlsxwriter') as writer: # type: ignore
-            pd.DataFrame(report_rf).transpose().round(2).to_excel(writer, sheet_name="Evaluasi_RF")
-            pd.DataFrame(cm, index=pd.Index(display_labels_rf), columns=pd.Index(display_labels_rf)).to_excel(writer, sheet_name="Confusion_Matrix_RF")
-        towrite.seek(0)
-        st.download_button("📄 Unduh Evaluasi RF", data=towrite, file_name="evaluasi_rf.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-
-    # Download Evaluasi DT
-    if st.button("⬇️ Download Evaluasi Decision Tree ke Excel"):
-        towrite = io.BytesIO()
-        with pd.ExcelWriter(towrite, engine='xlsxwriter') as writer: # type: ignore
-            pd.DataFrame(report_dt).transpose().round(2).to_excel(writer, sheet_name="Evaluasi_DT")
-            pd.DataFrame(confusion_matrix(y_enc, y_pred_dt, labels=unique_labels_dt), index=pd.Index(display_labels_dt), columns=pd.Index(display_labels_dt)).to_excel(writer, sheet_name="Confusion_Matrix_DT")
-        towrite.seek(0)
-        st.download_button("📄 Unduh Evaluasi DT", data=towrite, file_name="evaluasi_dt.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-
-    # Download Perbandingan F1
-    if st.button("⬇️ Download Perbandingan ke Excel"):
-        towrite_cmp = io.BytesIO()
-        with pd.ExcelWriter(towrite_cmp, engine='xlsxwriter') as writer: # type: ignore
-            df_comp.to_excel(writer, sheet_name="Perbandingan_F1")
-        towrite_cmp.seek(0)
-        st.download_button("📄 Unduh Perbandingan F1", data=towrite_cmp, file_name="perbandingan_f1.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-
-    # Export PDF
-    if st.button("🖨️ Export Evaluasi ke PDF"):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            # Confusion Matrix Image
-            cm_fig, cm_ax = plt.subplots()
-            ConfusionMatrixDisplay(confusion_matrix(y_enc, y_pred), display_labels=labels).plot(ax=cm_ax)
-            cm_path = os.path.join(tmpdir, "cm.png")
-            cm_fig.savefig(cm_path, bbox_inches='tight')
-
-            # F1 Comparison Image
-            comp_fig, comp_ax = plt.subplots(figsize=(10,4))
-            df_comp.plot(kind='bar', ax=comp_ax)
-            comp_ax.set_ylabel('F1-Score')
-            comp_ax.set_title('Perbandingan F1-Score DT vs RF')
-            comp_path = os.path.join(tmpdir, "comp.png")
-            comp_fig.savefig(comp_path, bbox_inches='tight')
-
-            pdf = FPDF()
-            pdf.add_page()
-            pdf.set_font("Arial", size=12)
-            pdf.cell(0, 10, "Evaluasi Model Random Forest", ln=True, align='C')
-            pdf.image(cm_path, x=10, y=25, w=180)
-            pdf.ln(95)
-            pdf.cell(0, 10, "Perbandingan F1-Score DT vs RF", ln=True, align='C')
-            pdf.image(comp_path, x=10, y=130, w=180)
-
-            pdf_path = os.path.join(tmpdir, "evaluasi.pdf")
-            pdf.output(pdf_path)
-
-            with open(pdf_path, "rb") as f:
-                st.download_button("📄 Unduh Evaluasi PDF", data=f, file_name="evaluasi.pdf", mime="application/pdf")
-
-with tab5:
-    st.subheader("📊 Evaluasi Model Balanced Random Forest")
-    y_pred_bal_rf = model_bal_rf.predict(X_eval)
-    unique_labels_bal_rf = sorted(list(set(y_enc) | set(y_pred_bal_rf)))
-    display_labels_bal_rf = [labels[i] for i in unique_labels_bal_rf]
-
-    # Confusion Matrix
-    cm_bal = confusion_matrix(y_enc, y_pred_bal_rf, labels=unique_labels_bal_rf)
-    fig_cm_bal, ax_cm_bal = plt.subplots()
-    ConfusionMatrixDisplay(confusion_matrix=cm_bal, display_labels=display_labels_bal_rf).plot(ax=ax_cm_bal)
-    st.pyplot(fig_cm_bal)
-
-    # Normalized Confusion Matrix
-    st.markdown("#### Confusion Matrix (Normalized)")
-    cm_norm_bal = confusion_matrix(y_enc, y_pred_bal_rf, labels=unique_labels_bal_rf, normalize='true')
-    fig_n_bal, ax_n_bal = plt.subplots()
-    ConfusionMatrixDisplay(confusion_matrix=cm_norm_bal, display_labels=display_labels_bal_rf).plot(ax=ax_n_bal, values_format='.2f')
-    st.pyplot(fig_n_bal)
-
-    # Classification Report
-    report_bal_rf = classification_report(
-        y_enc, y_pred_bal_rf, labels=unique_labels_bal_rf, target_names=display_labels_bal_rf,
-        output_dict=True, zero_division=0.0  # type: ignore
-    )
-    st.markdown("### Metrik Klasifikasi Balanced RF")
-    st.dataframe(pd.DataFrame(report_bal_rf).transpose().round(2))
-
-    # Feature Importance
-    st.markdown("### 🔍 Feature Importance Balanced RF")
-    feat_imp_bal = pd.DataFrame({
-        "Fitur": dummy_features,
-        "Importance": model_bal_rf.feature_importances_
-    }).sort_values("Importance", ascending=False)
-    st.dataframe(feat_imp_bal)
-
-    # Distribusi prediksi
-    st.write("Distribusi prediksi Balanced RF:", pd.Series(y_pred_bal_rf).value_counts())
-
-st.write("Prediksi RF:", list(np.unique(y_pred, return_counts=True)[0]), list(np.unique(y_pred, return_counts=True)[1]))
-st.write("Prediksi DT:", list(np.unique(y_pred_dt, return_counts=True)[0]), list(np.unique(y_pred_dt, return_counts=True)[1]))
-st.write("Distribusi label (full):", pd.Series(df['label_efektivitas']).value_counts())
-st.write("Distribusi prediksi RF:", pd.Series(y_pred).value_counts())
-st.write("Distribusi prediksi DT:", pd.Series(y_pred_dt).value_counts())
+st.markdown("---")
+st.markdown("""
+<div style='text-align: center; color: #666; padding: 20px;'>
+    <p><strong>Skripsi Informatika S1 - UPN "Veteran" Yogyakarta</strong></p>
+    <p>Muhammad Rizqi (123190083) | 2025</p>
+    <p><em>Klasifikasi Efektivitas Respon Intervensi Stunting di Desa</em></p>
+</div>
+""", unsafe_allow_html=True)

@@ -1,181 +1,314 @@
-# Skripsi: Klasifikasi Efektivitas Intervensi Stunting di Desa
+# 🎓 Klasifikasi Efektivitas Intervensi Stunting di Desa
 
-## 📖 Judul
+[![Python](https://img.shields.io/badge/Python-3.8%2B-blue)](https://python.org)
+[![Streamlit](https://img.shields.io/badge/Streamlit-1.25%2B-red)](https://streamlit.io)
+[![Scikit-Learn](https://img.shields.io/badge/Scikit--Learn-1.3.2-orange)](https://scikit-learn.org)
 
-**Klasifikasi Efektivitas Respon Intervensi Stunting di Desa Menggunakan Algoritma Decision Tree dan Random Forest (Studi Kasus: Data Kementerian Desa PDTT 2023)**
+## 📖 Tentang Skripsi
+
+**Judul:** Klasifikasi Efektivitas Respon Intervensi Stunting di Desa Menggunakan Algoritma Decision Tree dan Random Forest (Studi Kasus: Data Kementerian Desa PDTT 2023)
+
+**Mahasiswa:** Muhammad Rizqi (123190083)  
+**Program Studi:** Informatika S1  
+**Universitas:** UPN "Veteran" Yogyakarta  
+**Tahun:** 2025
 
 ---
 
-## 📊 Deskripsi
+## 📊 Deskripsi Project
 
-Proyek ini merupakan bagian dari skripsi S1 Informatika dengan. Proyek ini merupakan aplikasi klasifikasi berbasis _machine learning_ yang bertujuan untuk memprediksi efektivitas intervensi stunting berdasarkan data layanan desa. Dibangun menggunakan Python dan Streamlit, proyek ini mengadopsi model _Decision Tree_ dan _Random Forest_ untuk mengevaluasi keberhasilan konvergensi stunting di desa berdasarkan data tahun 2023 dari Kementerian Desa PDTT.
+Aplikasi machine learning berbasis web untuk mengklasifikasikan efektivitas intervensi stunting di desa menggunakan data layanan desa tahun 2023 dari Kementerian Desa PDTT. Sistem ini mengimplementasikan algoritma **Decision Tree** dan **Random Forest** dengan interpretabilitas model menggunakan **SHAP**.
+
+### 🎯 Tujuan
+
+- Mengklasifikasikan efektivitas intervensi stunting berdasarkan 5 indikator kunci
+- Membandingkan performa algoritma Decision Tree dan Random Forest
+- Menyediakan interpretasi model yang dapat dipahami stakeholder
+- Membantu pengambilan keputusan dalam program pencegahan stunting
+
+### 📈 Fitur Indikator
+
+1. **Monitoring/Evaluasi** - Pelaksanaan monitoring konvergensi stunting
+2. **Posyandu** - Aktivitas rutin penyelenggaraan posyandu
+3. **RDS/TPPS** - Pembentukan Relawan Desa Sehat/Tim Percepatan Pencegahan Stunting
+4. **Peningkatan Kapasitas** - Pelatihan untuk kader dan pelaku desa
+5. **Ketahanan Pangan** - Program pengembangan ketahanan pangan keluarga
 
 ---
 
-## 📂 Struktur Direktori
+## 📂 Struktur Project
 
 ```
 skripsi_stunting/
-│   README.md
-│   main.py
-│   requirements.txt
-|   test_env.py
+├── README.md                    # Dokumentasi project
+├── requirements.txt             # Dependencies Python
+├── main.py                      # Entry point preprocessing
+├── test_env.py                  # Environment checker
 │
-├───data/
+├── data/                        # Dataset
 │   ├── jumlah-penerima-layanan-pencegahan-stunting-tahun-2023.xlsx
-│   ├── stunting_2023_cleaned.csv
-│   └── stunting_2023_labeled.csv
+│   └── stunting_2023_labeled.csv                    # Generated
 │
-├───model/
-│   ├── decision_tree_model.pkl
-│   └── random_forest_model.pkl
+├── model/                       # Model hasil training
+│   ├── decision_tree_model.pkl                      # Generated
+│   ├── random_forest_model.pkl                      # Generated
+│   ├── feature_label_encoders.pkl                   # Generated
+│   └── target_label_encoder.pkl                     # Generated
 │
-├───notebooks/
-│   └── eksplorasi_data.ipynb
+├── src/                         # Core modules
+│   ├── preprocessing.py         # Data preprocessing
+│   ├── feature_engineering.py  # Feature engineering & labeling
+│   ├── model_training.py        # Model training & evaluation
+│   ├── encoder_utils.py         # Encoding utilities
+│   ├── evaluation.py            # Model evaluation functions
+│   └── shap_utils.py            # SHAP interpretability
 │
-├───scripts/
-│   ├── clean_excel_to_csv.py
-│   └── labeling_efektivitas.py
+├── streamlit_app/               # Web interface
+│   └── app.py                   # Main Streamlit application
 │
-├───src/
-│   ├── encoder_utils.py
-│   ├── evaluation.py
-│   ├── feature_engineering.py
-│   ├── form_utils.py
-│   ├── model_training.py
-│   ├── preprocessing.py
-│   └── shap_utils.py
-│
-└───streamlit_app/
-    └── app.py
+└── notebooks/                   # Analysis notebooks (optional)
+    └── eksplorasi_data.ipynb    # Data exploration
 ```
 
 ---
 
-## 📅 Tahapan Proyek
+## 🚀 Panduan Instalasi & Penggunaan
 
-1. **Preprocessing & Labeling**
-
-   - Konversi Excel ke CSV (`clean_excel_to_csv.py`)
-   - Labeling efektivitas berdasarkan skor (`labeling_efektivitas.py`)
-
-2. **Pelatihan Model**
-
-   - Script di `model_training.py` untuk melatih dan menyimpan model DT & RF
-
-3. **Visualisasi dan Evaluasi**
-
-   - Aplikasi Streamlit `app.py` menampilkan:
-
-     - Interpretasi SHAP
-     - Form prediksi manual
-     - Distribusi prediksi
-     - Evaluasi akurasi dan visualisasi confusion matrix
-     - Ekspor hasil ke Excel & PDF
-
----
-
-## 🛠️ Instalasi
-
-1. **Buat environment (disarankan via conda):**
+### 1. **Persiapan Environment**
 
 ```bash
-conda create -n stunting-ml python=3.10
-conda activate stunting-ml
-```
+# Clone atau download project
+cd skripsi_stunting
 
-2. **Install dependencies:**
+# Buat virtual environment (recommended)
+python -m venv venv
+source venv/bin/activate  # Linux/Mac
+# atau
+venv\Scripts\activate     # Windows
 
-```bash
+# Install dependencies
 pip install -r requirements.txt
 ```
 
-3. **Jalankan Aplikasi Streamlit:**
-
-```bash
-streamlit run streamlit_app/app.py
-```
-
----
-
-## ⚙️ Kebutuhan Environment
-
-Lihat file `requirements.txt` atau gunakan `test_env.py` untuk memverifikasi environment yang dibutuhkan:
+### 2. **Cek Environment**
 
 ```bash
 python test_env.py
 ```
 
-## 🌐 Dependencies Utama
+### 3. **Preprocessing Data**
 
-- pandas, numpy
-- scikit-learn
-- matplotlib, seaborn, plotly
-- shap, joblib
-- streamlit, fpdf
+```bash
+# Pastikan file Excel ada di folder data/
+python main.py
+```
+
+**Output:** `data/stunting_2023_labeled.csv`
+
+### 4. **Training Model**
+
+```bash
+python src/model_training.py
+```
+
+**Output:** Model files di folder `model/`
+
+### 5. **Jalankan Aplikasi Web**
+
+```bash
+streamlit run streamlit_app/app.py
+```
+
+**Akses:** `http://localhost:8501`
 
 ---
 
-## 🧠 Model & Algoritma
+## 🔧 Kebutuhan Sistem
 
-- Decision Tree Classifier
-- Random Forest Classifier
-- Label Encoding untuk fitur kategorikal
-- SHAP untuk interpretasi model
-- Evaluasi: Confusion Matrix, Classification Report, F1-Score, Distribusi Probabilitas
+### Software Requirements
 
-## 🧪 Dokumentasi Teknis
+- **Python:** 3.8 atau lebih tinggi
+- **RAM:** Minimum 4GB (Recommended 8GB)
+- **Storage:** 500MB untuk dependencies + data
 
-### `model_training.py`
+### Key Dependencies
 
-- `train_model_rf(X, y)` — latih model Random Forest dan simpan ke `.pkl`
-- `train_model_dt(X, y)` — latih model Decision Tree dan simpan ke `.pkl`
+- `pandas` - Data manipulation
+- `scikit-learn` - Machine learning algorithms
+- `streamlit` - Web framework
+- `shap` - Model interpretability
+- `imbalanced-learn` - Handle class imbalance
+- `matplotlib/seaborn` - Visualization
 
-### `encoder_utils.py`
+---
 
-- `fit_label_encoders(df, fitur_kat)` — latih `LabelEncoder` untuk setiap kolom
-- `normalize_kategorikal(df, fitur_kat)` — normalisasi nilai kategorikal
+## 🧠 Metodologi
 
-### `evaluation.py`
+### 1. **Data Preprocessing**
 
-- `evaluate_model(model, X, y)` — kembalikan `classification_report`, `confusion_matrix`
+- Cleaning data Excel multi-header
+- Normalisasi nilai kategorikal
+- Handle missing values
+- Feature extraction lokasi desa
 
-### `shap_utils.py`
+### 2. **Feature Engineering**
 
-- `generate_shap_plot(...)` — kembalikan grafik SHAP interpretasi fitur
+- Perhitungan skor efektivitas (0-5)
+- Kategorisasi berdasarkan skor + anggaran:
+  - **Efektif:** Skor ≥ 3 + ada anggaran
+  - **Cukup Efektif:** Skor 1-2 + anggaran ≥ median
+  - **Kurang Efektif:** Skor 0 atau tidak ada anggaran
 
-### `form_utils.py`
+### 3. **Model Training**
 
-- `encode_manual_input()` — encoding untuk form manual input
+- **Algorithms:** Decision Tree, Random Forest
+- **Class Imbalance:** SMOTE oversampling
+- **Evaluation:** Accuracy, Precision, Recall, F1-Score
+- **Cross Validation:** 5-fold
 
-## 🤝 Acknowledgement
+### 4. **Model Interpretability**
 
-- Kementerian Desa, Pembangunan Daerah Tertinggal dan Transmigrasi (Kemendesa PDTT) atas data yang digunakan
-- Dosen Pembimbing dan Departemen Informatika
-- Pengembang pustaka open-source seperti Streamlit, Scikit-learn, SHAP, dan lainnya
+- **SHAP:** Feature importance & individual predictions
+- **Feature Importance:** Built-in model importance
+- **Confusion Matrix:** Performance visualization
 
-## 🎓 Kontak Penulis
+---
 
-- **Nama:** Muhammad Rizqi
-- **NIM:** 123190083
-- **Program Studi:** Informatika S1
-- **Universitas:** UPN "Veteran" Yogyakarta
+## 📊 Fitur Aplikasi
+
+### 🎯 **Dashboard Utama**
+
+- Ringkasan dataset dan distribusi
+- Filter data berdasarkan kabupaten
+- Visualisasi distribusi label dan skor
+
+### 🔮 **Prediksi Manual**
+
+- Form input untuk 5 indikator
+- Prediksi real-time dengan kedua model
+- Interpretasi SHAP untuk setiap prediksi
+
+### 📈 **Evaluasi Model**
+
+- Confusion Matrix untuk kedua model
+- Classification Report detail
+- Perbandingan performa RF vs DT
+- Feature importance analysis
+
+### 📤 **Export & Download**
+
+- Download data terfilter (CSV)
+- Export evaluasi model (Excel)
+- Visualisasi hasil analisis
+
+---
+
+## 🎓 Kontribusi Ilmiah
+
+### **Novelty**
+
+1. **Dataset Terbaru:** Menggunakan data Kemendes PDTT 2023
+2. **Multi-Indikator:** Kombinasi 5 indikator kunci stunting
+3. **Interpretability:** SHAP untuk transparansi model
+4. **Practical Application:** Web interface untuk stakeholder
+
+### **Expected Results**
+
+- Akurasi model > 85%
+- Identifikasi fitur paling berpengaruh
+- Rekomendasi kebijakan berbasis data
+- Framework untuk replikasi di daerah lain
+
+---
+
+## 📝 Troubleshooting
+
+### **Error: File tidak ditemukan**
+
+```bash
+# Pastikan file Excel ada di folder data/
+ls data/jumlah-penerima-layanan-pencegahan-stunting-tahun-2023.xlsx
+
+# Jalankan preprocessing ulang
+python main.py
+```
+
+### **Error: Model tidak ditemukan**
+
+```bash
+# Jalankan training ulang
+python src/model_training.py
+
+# Cek file model
+ls model/*.pkl
+```
+
+### **Error: Import module**
+
+```bash
+# Pastikan di root directory
+pwd  # Harus di skripsi_stunting/
+
+# Reinstall dependencies
+pip install -r requirements.txt
+```
+
+### **Error: Streamlit tidak bisa akses model**
+
+```bash
+# Jalankan dari root directory
+cd skripsi_stunting
+streamlit run streamlit_app/app.py
+```
+
+---
+
+## 📚 Referensi
+
+### **Academic References**
+
+1. Kementerian Desa PDTT. (2023). Dataset Layanan Pencegahan Stunting
+2. Breiman, L. (2001). Random Forests. Machine Learning, 45(1), 5-32
+3. Lundberg, S. M., & Lee, S.-I. (2017). A Unified Approach to Interpreting Model Predictions
+4. Chawla, N. V., et al. (2002). SMOTE: Synthetic Minority Oversampling Technique
+
+### **Technical Documentation**
+
+- [Scikit-Learn Documentation](https://scikit-learn.org/stable/)
+- [SHAP Documentation](https://shap.readthedocs.io/)
+- [Streamlit Documentation](https://docs.streamlit.io/)
+- [Pandas Documentation](https://pandas.pydata.org/docs/)
+
+---
+
+## 🤝 Acknowledgments
+
+- **Kementerian Desa PDTT** - Penyedia dataset
+- **Dosen Pembimbing: Bagus Muhammad Akbar, S.ST., M.Kom.** - Guidance dan supervisi
+- **UPN "Veteran" Yogyakarta** - Institusi pendukung
+- **Open Source Community** - Libraries dan tools
+
+---
+
+## 📧 Kontak
+
+**Muhammad Rizqi**  
+📧 Email: [mrizqi0153@gmail.com]  
+🎓 NIM: 123190083  
+🏫 Informatika S1 - UPN "Veteran" Yogyakarta
 
 ---
 
 ## ⚖️ Lisensi
 
-Repositori ini dibuat untuk kepentingan tugas akhir dan bersifat terbuka untuk tujuan edukasi. Mohon cantumkan referensi jika digunakan.
+Project ini dibuat untuk keperluan akademik (skripsi). Silakan gunakan untuk tujuan edukasi dengan menyertakan referensi yang sesuai.
+
+**Citation:**
+
+```
+Rizqi, M. (2025). Klasifikasi Efektivitas Respon Intervensi Stunting di Desa
+Menggunakan Algoritma Decision Tree dan Random Forest.
+Skripsi, Informatika S1, UPN "Veteran" Yogyakarta.
+```
 
 ---
-
-## 🌐 Referensi
-
-- Kementerian Desa PDTT. (2023). Dataset Intervensi Stunting.
-- Scikit-Learn Documentation
-- SHAP Explainability
-- Streamlit Documentation
-- Géron, A. (2019). _Hands-On Machine Learning with Scikit-Learn, Keras & TensorFlow_
-- Lundberg, S. M., & Lee, S.-I. (2017). _A Unified Approach to Interpreting Model Predictions_ (SHAP)
-
-Untuk pertanyaan atau kolaborasi, silakan hubungi melalui GitHub Issues atau kontak penulis skripsi.
