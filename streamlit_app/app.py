@@ -169,8 +169,8 @@ with st.expander("📚 Informasi Skripsi", expanded=False):
     **Program Studi:** Informatika S1  
     **Universitas:** UPN "Veteran" Yogyakarta
     
-    **Dataset:** {len(df)} desa dari data Kementerian Desa PDTT 2023  
-    **Fitur:** {len(FEATURE_COLUMNS)} indikator efektivitas intervensi stunting
+    **Dataset:** desa dari data Kementerian Desa PDTT 2023  
+    **Fitur:** indikator efektivitas intervensi stunting
     """)
 
 # ==========================================
